@@ -602,6 +602,12 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteVisit = (visitId: string) => {
+    if (window.confirm("Are you sure you want to delete this clinical record?")) {
+      setVisits(prev => prev.filter(v => v.id !== visitId));
+    }
+  };
+
   const handleDeleteAllPatients = () => {
     if (window.confirm("CRITICAL WARNING: This will permanently delete ALL patient records and their complete medical history. This action cannot be undone. Are you absolutely sure?")) {
       if (window.confirm("FINAL CONFIRMATION: Are you really sure you want to delete the entire patient database?")) {
@@ -705,6 +711,12 @@ const App: React.FC = () => {
       key,
       direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
     }));
+  };
+
+  const getVisitQrData = (visit: Visit) => {
+    const patient = patients.find(p => p.id === visit.patientId);
+    const medNames = visit.prescribedMeds.map(pm => medications.find(m => m.id === pm.medicationId)?.brandName || 'Unknown').join(', ');
+    return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medNames || 'None'}`;
   };
 
   return (
@@ -1017,6 +1029,7 @@ const App: React.FC = () => {
                                   setPatientFormSearch(patients.find(p => p.id === v.patientId)?.name || '');
                                   setShowVisitForm(true); 
                                 }} className="p-2 text-slate-400 hover:text-emerald-600" title="Edit"><Edit2 size={16}/></button>
+                                <button onClick={() => handleDeleteVisit(v.id)} className="p-2 text-slate-400 hover:text-red-500" title="Delete Log"><Trash2 size={16}/></button>
                              </div>
                           </td>
                         </tr>
@@ -1199,9 +1212,12 @@ const App: React.FC = () => {
            <div className="bg-white w-full h-full sm:h-auto sm:max-w-md sm:rounded-[3.5rem] p-8 md:p-12 shadow-2xl flex flex-col items-center text-center gap-6 animate-in zoom-in" onClick={e => e.stopPropagation()}>
               <div className="w-full flex justify-end sm:hidden"><button onClick={() => setQrVisit(null)} className="text-slate-400 text-3xl">&times;</button></div>
               <div className="bg-indigo-50 p-6 rounded-3xl text-indigo-600 shadow-inner"><QrCode size={48} /></div>
-              <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Scan Visit QR</h2><p className="text-slate-400 font-bold text-[9px] uppercase tracking-widest mt-1">Record ID: {qrVisit.id.substring(0,8).toUpperCase()}</p></div>
+              <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Scan Visit QR</h2></div>
               <div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg">
-                <QRCodeCanvas value={`Clinic ID: ${qrVisit.id}`} size={200} level="H" />
+                <QRCodeCanvas value={getVisitQrData(qrVisit)} size={200} level="M" />
+              </div>
+              <div className="text-left w-full text-xs text-slate-500 bg-slate-50 p-4 rounded-2xl whitespace-pre-wrap font-mono">
+                {getVisitQrData(qrVisit)}
               </div>
               <button onClick={() => setQrVisit(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
            </div>
@@ -1488,24 +1504,24 @@ const App: React.FC = () => {
       <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
         {printingVisit && (() => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
+          const medNames = printingVisit.prescribedMeds.map(pm => medications.find(m => m.id === pm.medicationId)?.brandName || 'Unknown').join(', ');
           return (
-            <div className="w-full text-center space-y-4 py-4 px-2">
-              <div className="border-b-2 border-black pb-2"><h1 className="text-2xl font-black uppercase tracking-tighter">SmartClinic</h1><p className="text-[10px] font-bold uppercase tracking-widest">Medical Record Receipt</p></div>
-              <div className="text-left space-y-2 text-[12px] pt-2">
-                <div className="flex justify-between border-b border-dashed border-gray-400 pb-1"><span className="font-bold">Date:</span><span>{formatDate(printingVisit.date)}</span></div>
-                <div className="flex justify-between border-b border-dashed border-gray-400 pb-1"><span className="font-bold">Patient:</span><span className="font-black">{p?.name}</span></div>
-                <div className="space-y-1 pt-2"><p className="font-bold border-b border-gray-200">Symptoms:</p><p className="italic pl-2 py-1">{printingVisit.symptoms || 'None'}</p></div>
+            <div className="w-full p-4 space-y-4 text-[13px]">
+              <div className="text-center border-b-2 border-black pb-4 mb-4">
+                <h1 className="text-2xl font-black">SmartClinic</h1>
+                <p className="font-bold uppercase tracking-widest">Medical Hub</p>
               </div>
-              <div className="text-left pt-4">
-                <p className="font-bold text-[14px] border-b-2 border-black mb-2 uppercase italic">Prescription</p>
-                <div className="space-y-3">
-                  {printingVisit.prescribedMeds.map((pm, idx) => {
-                    const med = medications.find(m => m.id === pm.medicationId);
-                    return (med && (<div key={idx} className="flex justify-between items-start text-[13px] border-b border-gray-50 pb-1"><div className="flex-grow"><span className="font-black">{idx + 1}. {med.brandName}</span><span className="text-[10px] block text-gray-500">{med.strength}</span></div><span className="shrink-0 bg-gray-100 px-2 rounded-md font-bold">Qty: {pm.quantity}</span></div>));
-                  })}
-                </div>
+              
+              <div className="space-y-3">
+                <div className="flex"><span className="font-bold w-24">Name:</span> <span>{p?.name || '---'}</span></div>
+                <div className="flex"><span className="font-bold w-24">Date of Visit:</span> <span>{formatDate(printingVisit.date)}</span></div>
+                <div className="flex"><span className="font-bold w-24">Symptoms:</span> <span>{printingVisit.symptoms || '---'}</span></div>
+                <div className="flex flex-col"><span className="font-bold mb-1">Medication:</span> <span className="pl-4 italic">{medNames || '---'}</span></div>
               </div>
-              <div className="pt-10 border-t border-black mt-10"><p className="text-[10px] font-black uppercase tracking-widest">Thank You</p></div>
+
+              <div className="pt-6 mt-6 border-t border-black text-center italic">
+                <p>Thank you for choosing SmartClinic</p>
+              </div>
             </div>
           );
         })()}
