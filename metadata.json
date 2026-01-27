@@ -1,0 +1,5 @@
+{
+  "name": "SmartClinic - Management System",
+  "description": "A comprehensive clinic management application for tracking patients, visits, and medications with AI-powered history summaries.",
+  "requestFramePermissions": []
+}

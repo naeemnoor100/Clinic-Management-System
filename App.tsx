@@ -1,0 +1,1517 @@
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { 
+  Users, 
+  PlusCircle, 
+  Pill, 
+  ClipboardList, 
+  LayoutDashboard, 
+  Search,
+  ArrowRight,
+  Stethoscope,
+  Trash2,
+  Sparkles,
+  Edit2,
+  Activity,
+  Clock,
+  Plus,
+  Printer,
+  QrCode,
+  ShoppingCart,
+  Minus,
+  CheckCircle2,
+  Droplets,
+  Settings,
+  Receipt,
+  Building2,
+  FlaskConical,
+  Tags,
+  AlertTriangle,
+  Layers,
+  X,
+  MessageCircle,
+  FileDown,
+  FileUp,
+  UserSearch,
+  ArrowUpDown,
+  History,
+  FileText,
+  TrendingUp,
+  Wallet,
+  PackageSearch,
+  Calendar,
+  LayoutTemplate,
+  Copy,
+  AlertCircle,
+  ShieldAlert,
+  Menu
+} from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types.ts';
+import { getPatientHistorySummary } from './services/gemini.ts';
+
+// --- Utility: Persistence ---
+const saveToLocal = (key: string, data: any) => localStorage.setItem(`smartclinic_${key}`, JSON.stringify(data));
+const getFromLocal = (key: string, fallback: any) => {
+  const saved = localStorage.getItem(`smartclinic_${key}`);
+  try {
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+
+// --- Utility: Date Formatting ---
+const formatDate = (dateStr: string) => {
+  if (!dateStr || !dateStr.includes('-')) return dateStr;
+  const [year, month, day] = dateStr.split('-');
+  return `${day}/${month}/${year}`;
+};
+
+const getCurrentIsoDate = () => new Date().toISOString().split('T')[0];
+
+// --- Constants ---
+const CURRENCY = "Rs.";
+
+// --- Expanded Dummy Data ---
+const dummyScientificNames: ScientificName[] = [
+  { id: 'sc1', label: 'Paracetamol' },
+  { id: 'sc2', label: 'Amoxicillin' },
+  { id: 'sc3', label: 'Metformin' },
+  { id: 'sc4', label: 'Metronidazole' },
+  { id: 'sc5', label: 'Ibuprofen' },
+  { id: 'sc6', label: 'Omeprazole' },
+  { id: 'sc7', label: 'Aspirin' },
+  { id: 'sc8', label: 'Cetirizine' },
+  { id: 'sc9', label: 'Azithromycin' },
+  { id: 'sc10', label: 'Atorvastatin' }
+];
+
+const dummyTemplates: PrescriptionTemplate[] = [
+  {
+    id: 'tpl1',
+    name: 'Common Flu',
+    diagnosis: 'Seasonal Viral Influenza',
+    prescribedMeds: [
+      { medicationId: 'm1', dosage: '500mg', frequency: 'TDS', duration: '3 Days', quantity: 10 }
+    ]
+  },
+  {
+    id: 'tpl2',
+    name: 'Urgent Antibiotic Course',
+    diagnosis: 'Acute Bacterial Infection',
+    prescribedMeds: [
+      { medicationId: 'm2', dosage: '250mg', frequency: 'BD', duration: '5 Days', quantity: 10 }
+    ]
+  }
+];
+
+const dummyCompanyNames: CompanyName[] = [
+  { id: 'c1', label: 'GSK' },
+  { id: 'c2', label: 'Pfizer' },
+  { id: 'c3', label: 'Abbott' },
+  { id: 'c4', label: 'Getz Pharma' },
+  { id: 'c5', label: 'Sanofi' },
+  { id: 'c6', label: 'Bayer' },
+  { id: 'c7', label: 'Searle' },
+  { id: 'c8', label: 'Sami Pharmaceuticals' }
+];
+
+const dummyMedTypes: MedType[] = [
+  { id: 't1', label: 'Tablet' },
+  { id: 't2', label: 'Syrup' },
+  { id: 't3', label: 'Injection' },
+  { id: 't4', label: 'Capsule' },
+  { id: 't5', label: 'Drops' },
+  { id: 't6', label: 'Ointment' }
+];
+
+const dummyMedCategories: MedCategory[] = [
+  { id: 'cat1', label: 'Analgesic' },
+  { id: 'cat2', label: 'Antibiotic' },
+  { id: 'cat3', label: 'Antidiabetic' },
+  { id: 'cat4', label: 'Antacid' },
+  { id: 'cat5', label: 'NSAID' },
+  { id: 'cat6', label: 'Antihistamine' },
+  { id: 'cat7', label: 'Cardiovascular' }
+];
+
+const dummySymptoms: Symptom[] = [
+  { id: 's1', label: 'Fever' },
+  { id: 's2', label: 'Dry Cough' },
+  { id: 's3', label: 'Headache' },
+  { id: 's4', label: 'Body Pain' },
+  { id: 's5', label: 'Nausea' },
+  { id: 's6', label: 'Sore Throat' },
+  { id: 's7', label: 'Fatigue' },
+  { id: 's8', label: 'Dizziness' },
+  { id: 's9', label: 'Shortness of Breath' }
+];
+
+const dummyVitalDefinitions: VitalDefinition[] = [
+  { id: 'v1', label: 'Temp', unit: '°F' },
+  { id: 'v2', label: 'B.P', unit: 'mmHg' },
+  { id: 'v3', label: 'Pulse', unit: 'bpm' },
+  { id: 'v4', label: 'Weight', unit: 'kg' },
+  { id: 'v5', label: 'SpO2', unit: '%' },
+  { id: 'v6', label: 'RBS', unit: 'mg/dL' }
+];
+
+const dummyPatients: Patient[] = [
+  { id: 'p1', patientCode: 'P-0001', name: 'Ali Ahmed', age: 45, gender: 'Male', phone: '0300-1234567', address: 'DHA Phase 5, Lahore', allergies: 'Penicillin', chronicConditions: 'Type 2 Diabetes' },
+  { id: 'p2', patientCode: 'P-0002', name: 'Sara Khan', age: 29, gender: 'Female', phone: '0321-7654321', address: 'Gulberg III, Lahore' },
+  { id: 'p3', patientCode: 'P-0003', name: 'Muhammad Bilal', age: 52, gender: 'Male', phone: '0333-1122334', address: 'Model Town, Lahore', allergies: 'NSAIDs', chronicConditions: 'Hypertension' },
+  { id: 'p4', patientCode: 'P-0004', name: 'Fatima Zahra', age: 34, gender: 'Female', phone: '0345-9988776', address: 'Bahria Town, Lahore' },
+  { id: 'p5', patientCode: 'P-0005', name: 'Zohaib Hassan', age: 12, gender: 'Male', phone: '0301-5544332', address: 'Johar Town, Lahore', allergies: 'Dust, Peanuts' },
+  { id: 'p6', patientCode: 'P-0006', name: 'Ayesha Siddiqui', age: 61, gender: 'Female', phone: '0322-8877665', address: 'Wapda Town, Lahore', chronicConditions: 'Osteoarthritis' },
+  { id: 'p7', patientCode: 'P-0007', name: 'Hamza Malik', age: 28, gender: 'Male', phone: '0331-4433221', address: 'Cavalry Ground, Lahore' }
+];
+
+const dummyMeds: Medication[] = [
+  { id: 'm1', brandName: 'Panadol', scientificName: 'Paracetamol', companyName: 'GSK', type: 'Tablet', unit: 'Tablet', strength: '500mg', category: 'Analgesic', stock: 12, reorderLevel: 20, pricePerUnit: 15 },
+  { id: 'm2', brandName: 'Amoxil', scientificName: 'Amoxicillin', companyName: 'GSK', type: 'Capsule', unit: 'Capsule', strength: '250mg', category: 'Antibiotic', stock: 45, reorderLevel: 20, pricePerUnit: 45 },
+  { id: 'm3', brandName: 'Flagyl', scientificName: 'Metronidazole', companyName: 'Abbott', type: 'Tablet', unit: 'Tablet', strength: '400mg', category: 'Antibiotic', stock: 80, reorderLevel: 25, pricePerUnit: 12 },
+  { id: 'm4', brandName: 'Glucophage', scientificName: 'Metformin', companyName: 'Pfizer', type: 'Tablet', unit: 'Tablet', strength: '500mg', category: 'Antidiabetic', stock: 200, reorderLevel: 50, pricePerUnit: 8 },
+  { id: 'm5', brandName: 'Brufen', scientificName: 'Ibuprofen', companyName: 'Abbott', type: 'Syrup', unit: 'Bottle', strength: '100mg/5ml', category: 'NSAID', stock: 5, reorderLevel: 10, pricePerUnit: 85 },
+  { id: 'm6', brandName: 'Risek', scientificName: 'Omeprazole', companyName: 'Getz Pharma', type: 'Capsule', unit: 'Capsule', strength: '20mg', category: 'Antacid', stock: 150, reorderLevel: 30, pricePerUnit: 25 },
+  { id: 'm7', brandName: 'Zyrtec', scientificName: 'Cetirizine', companyName: 'GSK', type: 'Tablet', unit: 'Tablet', strength: '10mg', category: 'Antihistamine', stock: 300, reorderLevel: 50, pricePerUnit: 10 },
+  { id: 'm8', brandName: 'Lipiget', scientificName: 'Atorvastatin', companyName: 'Getz Pharma', type: 'Tablet', unit: 'Tablet', strength: '20mg', category: 'Cardiovascular', stock: 100, reorderLevel: 20, pricePerUnit: 35 },
+  { id: 'm9', brandName: 'Azomax', scientificName: 'Azithromycin', companyName: 'Sami', type: 'Capsule', unit: 'Capsule', strength: '500mg', category: 'Antibiotic', stock: 40, reorderLevel: 10, pricePerUnit: 60 }
+];
+
+const SidebarItem: React.FC<{ icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; }> = ({ icon, label, active, onClick }) => (
+  <button 
+    onClick={onClick} 
+    className={`flex items-center gap-4 px-4 py-4 rounded-2xl transition-all duration-300 group w-full text-left ${
+      active 
+        ? 'bg-blue-600 text-white shadow-lg shadow-blue-200 translate-x-2' 
+        : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'
+    }`}
+  >
+    <span className={`${active ? 'text-white' : 'text-slate-400 group-hover:text-blue-600'}`}>{icon}</span>
+    <span className="font-black uppercase tracking-widest text-[10px]">{label}</span>
+  </button>
+);
+
+const App: React.FC = () => {
+  const [view, setView] = useState<View>('dashboard');
+  const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates'>('vitals');
+  const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
+  const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+  
+  // Search and Filter States
+  const [medSearchTerm, setMedSearchTerm] = useState('');
+  const [visitSearchTerm, setVisitSearchTerm] = useState('');
+  const [patientSearchTerm, setPatientSearchTerm] = useState('');
+  const [settingsSearchTerm, setSettingsSearchTerm] = useState('');
+  const [billingDate, setBillingDate] = useState<string>(''); 
+  
+  const [patients, setPatients] = useState<Patient[]>(() => getFromLocal('patients', dummyPatients));
+  const [medications, setMedications] = useState<Medication[]>(() => getFromLocal('meds', dummyMeds));
+  const [scientificNames, setScientificNames] = useState<ScientificName[]>(() => getFromLocal('scientific', dummyScientificNames));
+  const [companyNames, setCompanyNames] = useState<CompanyName[]>(() => getFromLocal('companies', dummyCompanyNames));
+  const [medTypes, setMedTypes] = useState<MedType[]>(() => getFromLocal('med_types', dummyMedTypes));
+  const [medCategories, setMedCategories] = useState<MedCategory[]>(() => getFromLocal('med_categories', dummyMedCategories));
+  const [symptoms, setSymptoms] = useState<Symptom[]>(() => getFromLocal('symptoms', dummySymptoms));
+  const [vitalDefinitions, setVitalDefinitions] = useState<VitalDefinition[]>(() => getFromLocal('vitals', dummyVitalDefinitions));
+  const [prescriptionTemplates, setPrescriptionTemplates] = useState<PrescriptionTemplate[]>(() => getFromLocal('templates', dummyTemplates));
+  const [visits, setVisits] = useState<Visit[]>(() => getFromLocal('visits', []));
+  const [pharmacySales, setPharmacySales] = useState<PharmacySale[]>(() => getFromLocal('pharmacy_sales', []));
+  
+  const [cart, setCart] = useState<{ medicationId: string, quantity: number }[]>([]);
+  const [walkinName, setWalkinName] = useState('Walk-in Customer');
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [isSummarizing, setIsSummarizing] = useState(false);
+  
+  const [printingVisit, setPrintingVisit] = useState<Visit | null>(null);
+  const [qrVisit, setQrVisit] = useState<Visit | null>(null);
+  const [showPatientForm, setShowPatientForm] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+  const [showVisitForm, setShowVisitForm] = useState(false);
+  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
+  const [showMedForm, setShowMedForm] = useState(false);
+  const [editingMedication, setEditingMedication] = useState<Medication | null>(null);
+  const [showSymptomForm, setShowSymptomForm] = useState(false);
+  const [editingSymptom, setEditingSymptom] = useState<Symptom | null>(null);
+  const [showScientificForm, setShowScientificForm] = useState(false);
+  const [editingScientificName, setEditingScientificName] = useState<ScientificName | null>(null);
+  const [showCompanyForm, setShowCompanyForm] = useState(false);
+  const [editingCompanyName, setEditingCompanyName] = useState<CompanyName | null>(null);
+  const [showTypeForm, setShowTypeForm] = useState(false);
+  const [editingMedType, setEditingMedType] = useState<MedType | null>(null);
+  const [showCategoryForm, setShowCategoryForm] = useState(false);
+  const [editingMedCategory, setEditingMedCategory] = useState<MedCategory | null>(null);
+  const [showVitalDefForm, setShowVitalDefForm] = useState(false);
+  const [editingVitalDefinition, setEditingVitalDefinition] = useState<VitalDefinition | null>(null);
+  const [showTemplateForm, setShowTemplateForm] = useState(false);
+  const [editingTemplate, setEditingTemplate] = useState<PrescriptionTemplate | null>(null);
+
+  const [tempPrescribedMeds, setTempPrescribedMeds] = useState<(PrescribedMed & { searchTerm?: string })[]>([]);
+  const [activeMedSearchIndex, setActiveMedSearchIndex] = useState<number | null>(null);
+  const [formDiagnosis, setFormDiagnosis] = useState('');
+  
+  // Tracking patient selection in encounter form
+  const [formSelectedPatientId, setFormSelectedPatientId] = useState<string | null>(null);
+  const [patientFormSearch, setPatientFormSearch] = useState('');
+  const [showPatientResults, setShowPatientResults] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowVisitForm(false);
+        setShowPatientForm(false);
+        setShowMedForm(false);
+        setShowSymptomForm(false);
+        setShowScientificForm(false);
+        setShowCompanyForm(false);
+        setShowTypeForm(false);
+        setShowCategoryForm(false);
+        setShowVitalDefForm(false);
+        setShowTemplateForm(false);
+        setQrVisit(null);
+        setPrintingVisit(null);
+        setEditingVisit(null);
+        setEditingPatient(null);
+        setActiveMedSearchIndex(null);
+        setFormSelectedPatientId(null);
+        setPatientFormSearch('');
+        setShowPatientResults(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    saveToLocal('patients', patients);
+    saveToLocal('meds', medications);
+    saveToLocal('scientific', scientificNames);
+    saveToLocal('companies', companyNames);
+    saveToLocal('med_types', medTypes);
+    saveToLocal('med_categories', medCategories);
+    saveToLocal('symptoms', symptoms);
+    saveToLocal('vitals', vitalDefinitions);
+    saveToLocal('templates', prescriptionTemplates);
+    saveToLocal('visits', visits);
+    saveToLocal('pharmacy_sales', pharmacySales);
+  }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales]);
+
+  // --- CSV Export/Import Helpers ---
+  const downloadCsv = (filename: string, csvContent: string) => {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', filename);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
+  const exportPatientsCsv = () => {
+    const headers = ['Code', 'Name', 'Age', 'Gender', 'Phone', 'Address', 'Allergies', 'Chronic Conditions'];
+    const rows = patients.map(p => [p.patientCode, p.name, p.age, p.gender, p.phone, p.address, p.allergies || '', p.chronicConditions || '']);
+    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
+    downloadCsv(`patients_backup_${getCurrentIsoDate()}.csv`, csvContent);
+  };
+
+  const handleImportPatientsCsv = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      const lines = content.split('\n').filter(l => l.trim() !== '');
+      if (lines.length < 2) return;
+      const newPatients: Patient[] = lines.slice(1).map(line => {
+        const [code, name, age, gender, phone, address, allergies, chronic] = line.split(',');
+        return {
+          id: Math.random().toString(36).substr(2, 9),
+          patientCode: code || `P-${Math.floor(Math.random() * 9000) + 1000}`,
+          name: name || 'Unknown',
+          age: parseInt(age) || 0,
+          gender: (gender as any) || 'Male',
+          phone: phone || '',
+          address: address || '',
+          allergies: allergies || '',
+          chronicConditions: chronic || ''
+        };
+      });
+      if (window.confirm(`Import ${newPatients.length} patients? Current patient data will be replaced.`)) {
+        setPatients(newPatients);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const exportMedsCsv = () => {
+    const headers = ['Brand Name', 'Scientific Name', 'Company', 'Type', 'Unit', 'Strength', 'Category', 'Stock', 'Reorder Level', 'Price'];
+    const rows = medications.map(m => [m.brandName, m.scientificName, m.companyName, m.type, m.unit, m.strength, m.category, m.stock, m.reorderLevel, m.pricePerUnit]);
+    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
+    downloadCsv(`medications_backup_${getCurrentIsoDate()}.csv`, csvContent);
+  };
+
+  const handleImportMedsCsv = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      const lines = content.split('\n').filter(l => l.trim() !== '');
+      if (lines.length < 2) return;
+      const newMeds: Medication[] = lines.slice(1).map(line => {
+        const [brand, scientific, company, type, unit, strength, category, stock, reorder, price] = line.split(',');
+        return {
+          id: Math.random().toString(36).substr(2, 9),
+          brandName: brand || 'Unnamed',
+          scientificName: scientific || '',
+          companyName: company || '',
+          type: type || 'Tablet',
+          unit: unit || 'Tablet',
+          strength: strength || '',
+          category: category || '',
+          stock: parseInt(stock) || 0,
+          reorderLevel: parseInt(reorder) || 0,
+          pricePerUnit: parseFloat(price) || 0
+        };
+      });
+      if (window.confirm(`Import ${newMeds.length} medicines? Current inventory data will be replaced.`)) {
+        setMedications(newMeds);
+      }
+    };
+    reader.readAsText(file);
+    event.target.value = '';
+  };
+
+  const exportVisitsCsv = () => {
+    const headers = ['Date', 'Patient Name', 'Symptoms', 'Diagnosis', 'Vitals', 'Medications', 'Fee', 'Status'];
+    const rows = visits.map(v => {
+      const p = patients.find(pat => pat.id === v.patientId);
+      const vitalsStr = vitalDefinitions.map(vd => v.vitals?.[vd.id] ? `${vd.label}: ${v.vitals[vd.id]} ${vd.unit}` : null).filter(Boolean).join('; ');
+      const medsStr = v.prescribedMeds.map(pm => {
+        const med = medications.find(m => m.id === pm.medicationId);
+        return `${med?.brandName || 'Unknown'} (${pm.quantity})`;
+      }).join('; ');
+      return [formatDate(v.date), `"${p?.name || 'Unknown'}"`, `"${v.symptoms || ''}"`, `"${v.diagnosis || ''}"`, `"${vitalsStr}"`, `"${medsStr}"`, v.feeAmount || 0, v.paymentStatus || 'Paid'];
+    });
+    const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
+    downloadCsv(`clinical_logs_${getCurrentIsoDate()}.csv`, csvContent);
+  };
+
+  const handleWhatsAppShare = (visit: Visit, patient: Patient) => {
+    const medsText = visit.prescribedMeds.map(pm => {
+      const med = medications.find(m => m.id === pm.medicationId);
+      return `- *${med?.brandName}*: ${pm.quantity}`;
+    }).join('\n');
+    const formattedDate = formatDate(visit.date);
+    const message = `*Clinic Visit Summary*\n\n*Name:* ${patient.name}\n*Date of Visit:* ${formattedDate}\n\n*Medications (Qty):*\n${medsText || 'None prescribed'}\n\n_SmartClinic_`;
+    const cleanPhone = patient.phone.replace(/[^0-9]/g, '');
+    const formattedPhone = cleanPhone.startsWith('0') ? '92' + cleanPhone.substring(1) : cleanPhone;
+    const url = `https://wa.me/${formattedPhone}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const triggerPrint = (visit: Visit) => {
+    setPrintingVisit(visit);
+    setTimeout(() => {
+      window.print();
+    }, 300);
+  };
+
+  const filteredPatients = useMemo(() => {
+    return patients.filter(p => {
+      const s = patientSearchTerm.toLowerCase();
+      return p.name.toLowerCase().includes(s) || p.phone.toLowerCase().includes(s) || p.patientCode.toLowerCase().includes(s);
+    });
+  }, [patients, patientSearchTerm]);
+
+  const filteredMeds = useMemo(() => {
+    return medications.filter(m => {
+      const s = medSearchTerm.toLowerCase();
+      return m.brandName.toLowerCase().includes(s) || m.scientificName.toLowerCase().includes(s) || m.companyName.toLowerCase().includes(s) || m.category.toLowerCase().includes(s);
+    });
+  }, [medications, medSearchTerm]);
+
+  const filteredSettingsItems = useMemo(() => {
+    const s = settingsSearchTerm.toLowerCase();
+    switch (settingsTab) {
+      case 'symptoms': return symptoms.filter(i => i.label.toLowerCase().includes(s));
+      case 'scientific': return scientificNames.filter(i => i.label.toLowerCase().includes(s));
+      case 'med_categories': return medCategories.filter(i => i.label.toLowerCase().includes(s));
+      case 'med_types': return medTypes.filter(i => i.label.toLowerCase().includes(s));
+      case 'companies': return companyNames.filter(i => i.label.toLowerCase().includes(s));
+      case 'vitals': return vitalDefinitions.filter(i => i.label.toLowerCase().includes(s));
+      case 'templates': return prescriptionTemplates.filter(i => i.name.toLowerCase().includes(s));
+      case 'meds': return medications.filter(i => i.brandName.toLowerCase().includes(s) || i.scientificName.toLowerCase().includes(s));
+      default: return [];
+    }
+  }, [settingsTab, symptoms, scientificNames, medCategories, medTypes, companyNames, vitalDefinitions, medications, prescriptionTemplates, settingsSearchTerm]);
+
+  const filteredBillingConsultations = useMemo(() => {
+    if (!billingDate) return visits;
+    return visits.filter(v => v.date === billingDate);
+  }, [visits, billingDate]);
+
+  const filteredBillingPharmacy = useMemo(() => {
+    if (!billingDate) return pharmacySales;
+    return pharmacySales.filter(s => s.date === billingDate);
+  }, [pharmacySales, billingDate]);
+
+  const billingStats = useMemo(() => {
+    const consultationIncome = filteredBillingConsultations.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
+    const pharmacyIncome = filteredBillingPharmacy.reduce((sum, s) => sum + s.totalAmount, 0);
+    return {
+      total: consultationIncome + pharmacyIncome,
+      consultations: consultationIncome,
+      pharmacy: pharmacyIncome
+    };
+  }, [filteredBillingConsultations, filteredBillingPharmacy]);
+
+  const addToCart = (medId: string) => {
+    const med = medications.find(m => m.id === medId);
+    if (!med || med.stock <= 0) return;
+    setCart(prev => {
+      const existing = prev.find(item => item.medicationId === medId);
+      if (existing) return prev.map(item => item.medicationId === medId ? { ...item, quantity: item.quantity + 1 } : item);
+      return [...prev, { medicationId: medId, quantity: 1 }];
+    });
+  };
+
+  const updateCartQty = (medId: string, delta: number) => {
+    const med = medications.find(m => m.id === medId);
+    setCart(prev => prev.map(item => {
+      if (item.medicationId === medId) {
+        const newQty = Math.max(1, Math.min(item.quantity + delta, med?.stock || 1));
+        return { ...item, quantity: newQty };
+      }
+      return item;
+    }));
+  };
+
+  const removeFromCart = (medId: string) => setCart(prev => prev.filter(i => i.medicationId !== medId));
+
+  const completeSale = () => {
+    if (cart.length === 0) return;
+    const items: PharmacySaleItem[] = cart.map(c => {
+      const med = medications.find(m => m.id === c.medicationId)!;
+      return { medicationId: c.medicationId, quantity: c.quantity, priceAtTime: med.pricePerUnit };
+    });
+    const totalAmount = items.reduce((sum, item) => sum + (item.quantity * item.priceAtTime), 0);
+    const newSale: PharmacySale = { id: Math.random().toString(36).substr(2, 9), customerName: walkinName, date: getCurrentIsoDate(), items, totalAmount, paymentStatus: 'Paid' };
+    setMedications(prev => prev.map(med => {
+      const cartItem = cart.find(ci => ci.medicationId === med.id);
+      if (cartItem) return { ...med, stock: med.stock - cartItem.quantity };
+      return med;
+    }));
+    setPharmacySales(prev => [...prev, newSale]);
+    setCart([]);
+    setWalkinName('Walk-in Customer');
+    alert("Sale completed!");
+  };
+
+  const handleVisitSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    const f = new FormData(e.currentTarget);
+    const pId = f.get('patientId') as string;
+    
+    if (!pId) {
+      alert("Please select a patient first.");
+      return;
+    }
+
+    const vitals: Record<string, string> = {};
+    vitalDefinitions.forEach(v => {
+      const val = f.get(`vital_${v.id}`) as string;
+      if (val) vitals[v.id] = val;
+    });
+
+    const finalPrescribedMeds = tempPrescribedMeds
+      .map(({searchTerm, ...rest}) => rest)
+      .filter(pm => pm.medicationId !== '');
+
+    const visitId = editingVisit ? editingVisit.id : Math.random().toString(36).substr(2, 9);
+    const newVisit: Visit = {
+      id: visitId,
+      patientId: pId,
+      date: f.get('date') as string,
+      diagnosis: formDiagnosis,
+      symptoms: (f.getAll('selectedSymptoms') as string[]).join(', '),
+      feeAmount: parseFloat(f.get('feeAmount') as string) || 0,
+      paymentStatus: (f.get('paymentStatus') || 'Paid') as any,
+      vitals,
+      prescribedMeds: finalPrescribedMeds
+    };
+
+    setMedications(prevMeds => {
+      let updatedMeds = [...prevMeds];
+      finalPrescribedMeds.forEach(pm => {
+        if (pm.medicationId && pm.quantity && pm.quantity > 0) {
+          updatedMeds = updatedMeds.map(m => m.id === pm.medicationId ? { ...m, stock: Math.max(0, m.stock - pm.quantity!) } : m);
+        }
+      });
+      return updatedMeds;
+    });
+
+    if (editingVisit) setVisits(v => v.map(i => i.id === editingVisit.id ? newVisit : i));
+    else setVisits(v => [...v, newVisit]);
+    
+    setShowVisitForm(false);
+    setEditingVisit(null);
+    setTempPrescribedMeds([]);
+    setFormDiagnosis('');
+    setFormSelectedPatientId(null);
+    setPatientFormSearch('');
+    triggerPrint(newVisit);
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const tpl = prescriptionTemplates.find(t => t.id === templateId);
+    if (!tpl) return;
+    setFormDiagnosis(tpl.diagnosis);
+    setTempPrescribedMeds(tpl.prescribedMeds.map(pm => ({ ...pm, searchTerm: undefined })));
+  };
+
+  const handleAiSummary = async (patientId: string) => {
+    const p = patients.find(pat => pat.id === patientId);
+    if (!p) return;
+    setIsSummarizing(true);
+    setAiSummary(null);
+    try {
+      const summary = await getPatientHistorySummary(p, visits.filter(v => v.patientId === patientId), medications);
+      setAiSummary(summary || "No history available.");
+    } catch (e) {
+      setAiSummary("Error generating analysis.");
+    } finally {
+      setIsSummarizing(false);
+    }
+  };
+
+  const handleDeletePatient = (patientId: string) => {
+    if (window.confirm("Are you sure you want to delete this patient and all their clinical records?")) {
+      setPatients(prev => prev.filter(p => p.id !== patientId));
+      setVisits(prev => prev.filter(v => v.patientId !== patientId));
+      if (selectedPatientId === patientId) {
+        setSelectedPatientId(null);
+        setView('patients');
+      }
+    }
+  };
+
+  const handleDeleteAllPatients = () => {
+    if (window.confirm("CRITICAL WARNING: This will permanently delete ALL patient records and their complete medical history. This action cannot be undone. Are you absolutely sure?")) {
+      if (window.confirm("FINAL CONFIRMATION: Are you really sure you want to delete the entire patient database?")) {
+        setPatients([]);
+        setVisits([]);
+        setSelectedPatientId(null);
+        setView('patients');
+        alert("All patient records have been deleted.");
+      }
+    }
+  };
+
+  const filteredVisits = useMemo(() => {
+    const sTerm = visitSearchTerm.toLowerCase();
+    return visits.filter(v => {
+      const p = patients.find(pat => pat.id === v.patientId);
+      
+      const medStrings = v.prescribedMeds.map(pm => {
+        const m = medications.find(med => med.id === pm.medicationId);
+        return `${m?.brandName} ${m?.scientificName}`;
+      }).join(' ');
+
+      const combinedData = `
+        ${p?.name} 
+        ${p?.patientCode} 
+        ${p?.phone} 
+        ${v.diagnosis} 
+        ${v.date} 
+        ${v.symptoms} 
+        ${medStrings}
+      `.toLowerCase();
+
+      return combinedData.includes(sTerm);
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [visits, patients, medications, visitSearchTerm]);
+
+  const stats = useMemo(() => {
+    const consultationIncome = visits.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
+    const pharmacyIncome = pharmacySales.reduce((sum, s) => sum + s.totalAmount, 0);
+    const lowStockCount = medications.filter(m => m.stock <= m.reorderLevel).length;
+    return {
+      totalPatients: patients.length,
+      totalVisits: visits.length,
+      collected: consultationIncome + pharmacyIncome,
+      pending: visits.filter(v => v.paymentStatus === 'Pending').reduce((sum, v) => sum + (v.feeAmount || 0), 0),
+      lowStockCount
+    };
+  }, [patients, visits, pharmacySales, medications]);
+
+  const selectedPatientInForm = useMemo(() => {
+    if (!formSelectedPatientId) return null;
+    return patients.find(p => p.id === formSelectedPatientId) || null;
+  }, [formSelectedPatientId, patients]);
+
+  const patientFormResults = useMemo(() => {
+    if (!patientFormSearch.trim()) return [];
+    const s = patientFormSearch.toLowerCase();
+    return patients.filter(p => 
+      p.name.toLowerCase().includes(s) || 
+      p.phone.includes(s) || 
+      p.patientCode.toLowerCase().includes(s)
+    ).slice(0, 5);
+  }, [patients, patientFormSearch]);
+
+  const patientPrescriptions = useMemo(() => {
+    if (!selectedPatientId) return [];
+    const pVisits = visits.filter(v => v.patientId === selectedPatientId);
+    const flattened: any[] = [];
+    pVisits.forEach(v => {
+      v.prescribedMeds.forEach(pm => {
+        const med = medications.find(m => m.id === pm.medicationId);
+        flattened.push({
+          date: v.date,
+          diagnosis: v.diagnosis,
+          medName: med?.brandName || 'Unknown',
+          strength: med?.strength || '',
+          quantity: pm.quantity,
+          dosage: pm.dosage,
+          visitId: v.id
+        });
+      });
+    });
+
+    return flattened.sort((a, b) => {
+      if (prescSort.key === 'date') {
+        const timeA = new Date(a.date).getTime();
+        const timeB = new Date(b.date).getTime();
+        return prescSort.direction === 'desc' ? timeB - timeA : timeA - timeB;
+      } else {
+        const nameA = a.medName.toLowerCase();
+        const nameB = b.medName.toLowerCase();
+        if (nameA < nameB) return prescSort.direction === 'asc' ? -1 : 1;
+        if (nameA > nameB) return prescSort.direction === 'asc' ? 1 : -1;
+        return 0;
+      }
+    });
+  }, [selectedPatientId, visits, medications, prescSort]);
+
+  const togglePrescSort = (key: 'date' | 'name') => {
+    setPrescSort(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc'
+    }));
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
+      {/* Mobile Top Header */}
+      <header className="md:hidden sticky top-0 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4 py-3 shrink-0 print:hidden">
+        <div className="flex items-center gap-2">
+          <div className="bg-blue-600 p-2 rounded-xl text-white"><Stethoscope size={20} /></div>
+          <span className="text-lg font-black text-slate-800 tracking-tighter">SmartClinic</span>
+        </div>
+        <button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg">
+          <Plus size={20} />
+        </button>
+      </header>
+
+      {/* Desktop Sidebar */}
+      <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
+        <div className="flex items-center gap-4 px-2">
+           <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div>
+           <div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div>
+        </div>
+        <nav className="flex flex-col gap-3 flex-grow">
+          <SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
+          <SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} />
+          <SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} />
+          <SidebarItem icon={<ShoppingCart size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} />
+          <SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} />
+          <SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
+        </nav>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="flex-grow p-4 md:p-12 overflow-auto print:hidden pb-24 md:pb-12">
+        <div className="max-w-6xl mx-auto w-full">
+           {view === 'dashboard' && (
+              <div className="space-y-6 md:space-y-10 animate-in fade-in">
+                <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                  <div onClick={() => setView('patients')} className="bg-blue-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
+                    <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                  </div>
+                  <div onClick={() => setView('billing')} className="bg-emerald-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-emerald-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Total Revenue</p>
+                    <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.collected.toLocaleString()}<TrendingUp size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                  </div>
+                  <div className="bg-amber-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-amber-100 group">
+                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Pending Payments</p>
+                    <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.pending.toLocaleString()}<Wallet size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                  </div>
+                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-rose-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Low Stock Medicines</p>
+                    <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                  </div>
+                  <div onClick={() => setView('visits')} className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                     <div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div>
+                     <Clock size={40} className="text-blue-200 group-hover:text-blue-500 transition-colors" />
+                  </div>
+                </div>
+              </div>
+           )}
+
+           {view === 'patients' && (
+             <div className="space-y-6 animate-in fade-in">
+               <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                 <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Patient Files</h1>
+                 <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
+                    <div className="flex gap-1 shrink-0">
+                       <button onClick={exportPatientsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export to Excel (CSV)"><FileDown size={18} /></button>
+                       <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import from Excel (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportPatientsCsv} /></label>
+                    </div>
+                    <div className="relative flex-grow sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input type="text" placeholder="Search..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-sm" />
+                    </div>
+                    <button onClick={() => { setEditingPatient(null); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
+                 </div>
+               </div>
+               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                 {filteredPatients.map(p => {
+                    const patientVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                    const lastVisit = patientVisits[0];
+
+                    return (
+                   <div key={p.id} onClick={() => { setSelectedPatientId(p.id); setView('patient-detail'); setDetailTab('history'); }} className="bg-white p-5 md:p-6 rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all group relative flex flex-col justify-between min-h-[140px]">
+                     <div>
+                       <div className="flex items-center gap-4">
+                         <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-black shrink-0">{p.name[0]}</div>
+                         <div className="flex-grow min-w-0">
+                           <div className="flex items-center gap-2">
+                             <h3 className="font-black text-slate-800 truncate text-base">{p.name}</h3>
+                             {(p.allergies || p.chronicConditions) && <AlertCircle size={14} className="text-red-500 shrink-0 animate-pulse" />}
+                           </div>
+                           <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{p.patientCode} • {p.age}Y</p>
+                         </div>
+                       </div>
+                       
+                       <div className="mt-4 flex flex-col gap-1.5">
+                         {lastVisit ? (
+                           <div className="flex items-center gap-2 text-slate-500">
+                             <Calendar size={12} className="text-blue-400" />
+                             <p className="text-[10px] md:text-[11px] font-bold">Last Visit: <span className="text-slate-700">{formatDate(lastVisit.date)}</span></p>
+                           </div>
+                         ) : (
+                           <p className="text-[10px] md:text-[11px] text-slate-300 italic font-medium">No visits recorded yet</p>
+                         )}
+                       </div>
+                     </div>
+
+                     <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
+                       <div className="flex gap-1">
+                          <button onClick={(e) => { e.stopPropagation(); setEditingPatient(p); setShowPatientForm(true); }} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={16} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); handleDeletePatient(p.id); }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                       </div>
+                       {lastVisit && (
+                         <button 
+                           onClick={(e) => { e.stopPropagation(); setQrVisit(lastVisit); }} 
+                           className="bg-indigo-50 text-indigo-600 p-2 md:p-2.5 rounded-lg md:rounded-xl hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-2 group/qr"
+                         >
+                           <QrCode size={18} />
+                           <span className="text-[9px] font-black uppercase tracking-tighter hidden sm:block">Visit QR</span>
+                         </button>
+                       )}
+                     </div>
+                   </div>
+                 )})}
+               </div>
+             </div>
+           )}
+
+           {view === 'patient-detail' && selectedPatientId && (
+             <div className="space-y-6 md:space-y-8 animate-in slide-in-from-right">
+                <div className="flex justify-between items-center">
+                  <button onClick={() => setView('patients')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs"><ArrowRight className="rotate-180" size={18} /> Back</button>
+                </div>
+                {(() => {
+                   const p = patients.find(pat => pat.id === selectedPatientId);
+                   return p ? (
+                     <div className="space-y-6 md:space-y-8">
+                       <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3rem] shadow-xl border border-slate-100 flex flex-col lg:flex-row gap-6 md:gap-10">
+                         <div className="flex-grow">
+                           <div className="flex justify-between items-start gap-4">
+                             <h2 className="text-2xl md:text-4xl font-black text-slate-800 leading-tight">{p.name}</h2>
+                             <div className="flex gap-1 no-print shrink-0">
+                               <button onClick={() => { setEditingPatient(p); setShowPatientForm(true); }} className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl" title="Edit Info"><Edit2 size={18}/></button>
+                               <button onClick={() => handleDeletePatient(p.id)} className="p-2.5 bg-red-50 text-red-400 hover:text-red-600 rounded-xl" title="Delete"><Trash2 size={18}/></button>
+                             </div>
+                           </div>
+                           <p className="text-slate-400 font-bold mt-2 uppercase text-[10px] md:text-xs">{p.patientCode} • {p.age}Y • {p.gender}</p>
+                           <p className="text-slate-600 mt-4 font-medium text-sm">{p.phone} • {p.address}</p>
+
+                           {/* Medical Alerts Section */}
+                           {(p.allergies || p.chronicConditions) && (
+                             <div className="mt-6 md:mt-8 flex flex-col sm:flex-row gap-3 md:gap-4">
+                                {p.allergies && (
+                                  <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3 flex-1">
+                                    <ShieldAlert className="text-rose-500 shrink-0" size={20} />
+                                    <div><p className="text-[9px] md:text-[10px] font-black uppercase text-rose-400 tracking-widest">Allergies</p><p className="text-xs md:text-sm font-black text-rose-700">{p.allergies}</p></div>
+                                  </div>
+                                )}
+                                {p.chronicConditions && (
+                                  <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 flex-1">
+                                    <Activity className="text-amber-500 shrink-0" size={20} />
+                                    <div><p className="text-[9px] md:text-[10px] font-black uppercase text-amber-400 tracking-widest">Chronic Conditions</p><p className="text-xs md:text-sm font-black text-amber-700">{p.chronicConditions}</p></div>
+                                  </div>
+                                )}
+                             </div>
+                           )}
+                         </div>
+                         <div className="bg-indigo-900 text-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] w-full lg:max-w-xs space-y-4 shadow-xl shadow-indigo-100">
+                            <h3 className="text-[10px] md:text-xs font-black uppercase tracking-widest flex items-center gap-2"><Sparkles size={16}/> Clinical Analysis</h3>
+                            <p className="text-xs md:text-sm italic opacity-80 leading-relaxed">"{aiSummary || "Analysis pending..."}"</p>
+                            <button onClick={() => handleAiSummary(selectedPatientId)} disabled={isSummarizing} className="w-full bg-white text-indigo-900 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black uppercase text-[9px] md:text-[10px] tracking-widest hover:bg-indigo-50 transition-all">{isSummarizing ? "Analyzing..." : "Analyze History"}</button>
+                         </div>
+                       </div>
+
+                       <div className="space-y-6">
+                         <div className="flex gap-1 md:gap-2 bg-slate-200/50 p-1 rounded-xl md:rounded-2xl w-full sm:w-fit no-print overflow-x-auto">
+                           <button onClick={() => setDetailTab('history')} className={`flex-1 sm:flex-none px-4 md:px-6 py-2 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${detailTab === 'history' ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}><History size={14}/> History</button>
+                           <button onClick={() => setDetailTab('prescriptions')} className={`flex-1 sm:flex-none px-4 md:px-6 py-2 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black uppercase tracking-widest transition-all flex items-center justify-center gap-2 whitespace-nowrap ${detailTab === 'prescriptions' ? 'bg-white shadow text-indigo-600' : 'text-slate-500 hover:text-slate-700'}`}><FileText size={14}/> Meds</button>
+                         </div>
+
+                         {detailTab === 'history' && (
+                           <div className="space-y-4 animate-in fade-in">
+                              <h3 className="text-lg md:text-xl font-black text-slate-800">Visit History</h3>
+                              <div className="space-y-3 md:space-y-4">
+                                 {visits.filter(v => v.patientId === selectedPatientId)
+                                   .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                   .map(v => (
+                                   <div key={v.id} className="bg-white p-5 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4 group">
+                                      <div className="flex-grow">
+                                        <p className="text-[10px] text-slate-400 mb-1 font-bold">{formatDate(v.date)}</p>
+                                        <p className="font-bold text-slate-800 leading-tight mb-2 text-sm md:text-base">{v.diagnosis}</p>
+                                        <div className="flex flex-wrap gap-1">
+                                          {v.symptoms ? v.symptoms.split(', ').map((s, i) => (
+                                            <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-black rounded-full uppercase tracking-tighter">{s}</span>
+                                          )) : <span className="text-slate-300 italic text-[10px]">No symptoms recorded</span>}
+                                        </div>
+                                      </div>
+                                      <div className="flex gap-2 shrink-0 md:opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                                         <button onClick={() => handleWhatsAppShare(v, p)} className="bg-green-50 text-green-600 p-2.5 rounded-lg hover:bg-green-100 transition-all" title="Share WhatsApp"><MessageCircle size={16}/></button>
+                                         <button onClick={() => setQrVisit(v)} className="bg-indigo-50 text-indigo-600 p-2.5 rounded-lg hover:bg-indigo-100 transition-all" title="QR Code"><QrCode size={16}/></button>
+                                         <button onClick={() => triggerPrint(v)} className="bg-blue-50 text-blue-600 p-2.5 rounded-lg hover:bg-blue-100 transition-all" title="Print"><Printer size={16}/></button>
+                                      </div>
+                                   </div>
+                                 ))}
+                                 {visits.filter(v => v.patientId === selectedPatientId).length === 0 && (
+                                   <div className="py-12 md:py-20 text-center bg-white rounded-3xl md:rounded-[2rem] border-2 border-dashed border-slate-100 px-4">
+                                      <History size={40} className="mx-auto text-slate-200 mb-4"/>
+                                      <p className="text-slate-400 font-bold text-sm">No clinical history found for this patient.</p>
+                                   </div>
+                                 )}
+                              </div>
+                           </div>
+                         )}
+
+                         {detailTab === 'prescriptions' && (
+                           <div className="space-y-4 animate-in slide-in-from-bottom">
+                              <h3 className="text-lg md:text-xl font-black text-slate-800">Archive</h3>
+                              <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                                <div className="overflow-x-auto custom-scrollbar">
+                                  <table className="w-full text-left min-w-[500px]">
+                                    <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                      <tr>
+                                        <th className="px-6 md:px-8 py-4 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => togglePrescSort('date')}>Date</th>
+                                        <th className="px-6 md:px-8 py-4 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => togglePrescSort('name')}>Medication</th>
+                                        <th className="px-6 md:px-8 py-4">Diagnosis</th>
+                                        <th className="px-6 md:px-8 py-4 text-right">Qty</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {patientPrescriptions.map((pr, idx) => (
+                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                                          <td className="px-6 md:px-8 py-4 text-[11px] font-bold text-slate-400">{formatDate(pr.date)}</td>
+                                          <td className="px-6 md:px-8 py-4">
+                                            <p className="font-black text-slate-800 text-xs md:text-sm">{pr.medName}</p>
+                                            <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">{pr.strength}</p>
+                                          </td>
+                                          <td className="px-6 md:px-8 py-4">
+                                            <p className="text-[11px] text-slate-600 italic line-clamp-1">{pr.diagnosis || '---'}</p>
+                                          </td>
+                                          <td className="px-6 md:px-8 py-4 text-right font-black text-indigo-600 text-xs md:text-sm">
+                                            {pr.quantity}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                           </div>
+                         )}
+                       </div>
+                     </div>
+                   ) : null;
+                })()}
+             </div>
+           )}
+
+           {view === 'visits' && (
+             <div className="space-y-6 md:space-y-8 animate-in fade-in">
+               <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                 <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Clinical Logs</h1>
+                 <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
+                    <button onClick={exportVisitsCsv} className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all shrink-0" title="Export CSV"><FileDown size={18} /></button>
+                    <div className="relative flex-grow sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                      <input type="text" placeholder="Search..." value={visitSearchTerm} onChange={(e) => setVisitSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-sm" />
+                    </div>
+                    <button onClick={() => { 
+                      setEditingVisit(null); 
+                      setTempPrescribedMeds([]); 
+                      setFormDiagnosis('');
+                      setFormSelectedPatientId(null); 
+                      setPatientFormSearch('');
+                      setShowVisitForm(true); 
+                    }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black flex items-center gap-2 shadow-lg text-sm shrink-0">
+                      <PlusCircle size={18} /> <span className="hidden xs:inline">New Record</span>
+                    </button>
+                 </div>
+               </div>
+               <div className="bg-white rounded-3xl md:rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
+                 <div className="overflow-x-auto custom-scrollbar">
+                 <table className="w-full text-left min-w-[700px]">
+                   <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                     <tr><th className="px-6 md:px-8 py-5">Date</th><th className="px-6 md:px-8 py-5">Patient</th><th className="px-6 md:px-8 py-5">Symptoms</th><th className="px-6 md:px-8 py-5">Diagnosis</th><th className="px-6 md:px-8 py-5">Status</th><th className="px-6 md:px-8 py-5 text-right">Actions</th></tr>
+                   </thead>
+                   <tbody className="divide-y divide-slate-100">
+                     {filteredVisits.map(v => {
+                       const p = patients.find(pat => pat.id === v.patientId);
+                       return (
+                        <tr key={v.id} className="hover:bg-slate-50 transition-colors group">
+                          <td className="px-6 md:px-8 py-5 font-bold text-slate-400 text-[11px] whitespace-nowrap">{formatDate(v.date)}</td>
+                          <td className="px-6 md:px-8 py-5 whitespace-nowrap">
+                            <p className="font-black text-slate-800 text-xs md:text-sm">{p?.name}</p>
+                            <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase tracking-tight">{p?.age}Y • {p?.phone}</p>
+                          </td>
+                          <td className="px-6 md:px-8 py-5"><div className="flex flex-wrap gap-1 max-w-[150px]">{v.symptoms ? v.symptoms.split(', ').map((s, i) => (<span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-black rounded-full uppercase tracking-tighter">{s}</span>)) : <span className="text-slate-300 italic text-[10px]">None</span>}</div></td>
+                          <td className="px-6 md:px-8 py-5 font-bold text-slate-700 text-xs md:text-sm">{v.diagnosis}</td>
+                          <td className="px-6 md:px-8 py-5"><span className={`px-3 md:px-4 py-1 rounded-full text-[9px] font-black uppercase ${v.paymentStatus === 'Paid' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>{v.paymentStatus}</span></td>
+                          <td className="px-6 md:px-8 py-5 text-right">
+                             <div className="flex items-center gap-1 md:gap-2 justify-end">
+                                <button onClick={() => triggerPrint(v)} className="p-2 text-slate-400 hover:text-blue-600" title="Print"><Printer size={16}/></button>
+                                <button onClick={() => setQrVisit(v)} className="p-2 text-slate-400 hover:text-indigo-600" title="QR"><QrCode size={16}/></button>
+                                <button onClick={() => { 
+                                  setEditingVisit(v); 
+                                  setTempPrescribedMeds(v.prescribedMeds || []); 
+                                  setFormDiagnosis(v.diagnosis || '');
+                                  setFormSelectedPatientId(v.patientId); 
+                                  setPatientFormSearch(patients.find(p => p.id === v.patientId)?.name || '');
+                                  setShowVisitForm(true); 
+                                }} className="p-2 text-slate-400 hover:text-emerald-600" title="Edit"><Edit2 size={16}/></button>
+                             </div>
+                          </td>
+                        </tr>
+                       );
+                     })}
+                   </tbody>
+                 </table>
+                 </div>
+               </div>
+             </div>
+           )}
+
+           {view === 'pharmacy' && (
+             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 animate-in fade-in">
+               <div className="lg:col-span-2 space-y-6">
+                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                   <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Pharmacy</h1>
+                   <div className="relative w-full sm:w-64">
+                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                     <input type="text" placeholder="Search medicines..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold text-sm" />
+                   </div>
+                 </div>
+                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                   {filteredMeds.map(med => {
+                     const isLowStock = med.stock <= med.reorderLevel;
+                     return (
+                      <div key={med.id} className={`bg-white p-5 rounded-3xl border-2 transition-all flex flex-col justify-between shadow-sm ${isLowStock ? 'border-amber-200' : 'border-white hover:border-blue-500'}`}>
+                        <div>
+                           <div className="flex justify-between items-start gap-2"><h3 className="text-lg font-black text-slate-800 leading-tight">{med.brandName}</h3>{isLowStock && (<span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 shrink-0"><AlertTriangle size={10} /> Low</span>)}</div>
+                           <p className="text-slate-400 text-[10px] font-bold uppercase leading-tight mb-3 mt-1">{med.scientificName} • {med.strength}<br/>{med.companyName} • {med.type}</p>
+                           <div className="text-[10px] font-black uppercase tracking-tight flex justify-between items-center"><span className={isLowStock ? 'text-amber-600' : 'text-slate-500'}>Stock: {med.stock} {med.unit}</span> <span className="text-emerald-600 text-base">{CURRENCY} {med.pricePerUnit}</span></div>
+                        </div>
+                        <div className="mt-4 pt-4 border-t flex items-center justify-end">
+                          <button disabled={med.stock <= 0} onClick={() => addToCart(med.id)} className="bg-blue-600 text-white p-2.5 rounded-xl disabled:bg-slate-200 transition-all active:scale-90"><Plus size={20} /></button>
+                        </div>
+                      </div>
+                     );
+                   })}
+                 </div>
+               </div>
+               
+               {/* Cart Section - Adjusts for mobile flow */}
+               <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] shadow-xl border-4 border-white h-fit lg:sticky lg:top-12 space-y-6 md:space-y-8">
+                  <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><ShoppingCart className="text-blue-600" size={24} /> Checkout</h2>
+                  <div className="space-y-3 max-h-60 md:max-h-96 overflow-y-auto pr-1 custom-scrollbar">
+                    {cart.length === 0 ? <p className="text-center py-8 text-slate-300 font-bold text-sm uppercase">Cart is empty</p> : 
+                    cart.map(item => {
+                      const med = medications.find(m => m.id === item.medicationId)!;
+                      return (
+                        <div key={item.medicationId} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                          <div className="flex-grow min-w-0 pr-2"><p className="font-black text-slate-800 text-xs truncate">{med.brandName}</p><p className="text-[9px] text-slate-400 uppercase">{CURRENCY} {med.pricePerUnit} × {item.quantity}</p></div>
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => updateCartQty(item.medicationId, -1)} className="p-1 border rounded bg-white text-slate-400"><Minus size={12}/></button>
+                            <span className="font-black text-xs min-w-[1.5rem] text-center">{item.quantity}</span>
+                            <button onClick={() => updateCartQty(item.medicationId, 1)} className="p-1 border rounded bg-white text-slate-400"><Plus size={12}/></button>
+                            <button onClick={() => removeFromCart(item.medicationId)} className="text-rose-400 ml-1"><Trash2 size={14}/></button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="border-t pt-5">
+                    <div className="flex justify-between items-center mb-4"><span className="text-slate-400 font-black uppercase text-[10px]">Total</span><span className="text-2xl font-black text-blue-600">{CURRENCY} {cart.reduce((sum, item) => sum + (item.quantity * medications.find(m => m.id === item.medicationId)!.pricePerUnit), 0).toLocaleString()}</span></div>
+                    <button onClick={completeSale} disabled={cart.length === 0} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl disabled:opacity-20 active:scale-95 transition-all text-sm">Place Order</button>
+                  </div>
+               </div>
+             </div>
+           )}
+
+           {view === 'billing' && (
+              <div className="space-y-6 md:space-y-8 animate-in fade-in">
+                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                   <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Billing</h1>
+                   <div className="relative w-full sm:w-auto"><input type="date" value={billingDate} onChange={(e) => setBillingDate(e.target.value)} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 font-black text-xs outline-none focus:ring-2 focus:ring-blue-500/20"/>{billingDate && (<button onClick={() => setBillingDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X size={14} /></button>)}</div>
+                 </div>
+                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-lg"><p className="text-[9px] font-bold uppercase opacity-80">Total Revenue</p><p className="text-2xl md:text-3xl font-black mt-1">{CURRENCY} {billingStats.total.toLocaleString()}</p></div>
+                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"><p className="text-[9px] font-bold uppercase text-slate-400">Consultations</p><p className="text-xl md:text-2xl font-black text-blue-600 mt-1">{CURRENCY} {billingStats.consultations.toLocaleString()}</p></div>
+                    <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"><p className="text-[9px] font-bold uppercase text-slate-400">Pharmacy</p><p className="text-xl md:text-2xl font-black text-emerald-600 mt-1">{CURRENCY} {billingStats.pharmacy.toLocaleString()}</p></div>
+                 </div>
+                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+                    <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col h-full min-h-[300px]"><h2 className="text-lg font-black mb-4 flex items-center gap-2"><Stethoscope size={18} className="text-blue-500" /> Consultations</h2><div className="space-y-4 overflow-y-auto custom-scrollbar flex-grow pr-1">{filteredBillingConsultations.map(v => (<div key={v.id} className="flex justify-between items-center border-b border-slate-50 pb-3"><div><p className="font-bold text-slate-800 text-sm">{patients.find(p => p.id === v.patientId)?.name || 'Unknown'}</p><p className="text-[9px] text-slate-400 font-bold uppercase">{formatDate(v.date)}</p></div><div className="text-right"><p className="font-black text-blue-600 text-sm">{CURRENCY} {v.feeAmount}</p><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${v.paymentStatus === 'Paid' ? 'bg-emerald-50 text-emerald-500' : 'bg-amber-50 text-amber-500'}`}>{v.paymentStatus}</span></div></div>))}</div></div>
+                    <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col h-full min-h-[300px]"><h2 className="text-lg font-black mb-4 flex items-center gap-2"><ShoppingCart size={18} className="text-indigo-500" /> Pharmacy</h2><div className="space-y-4 overflow-y-auto custom-scrollbar flex-grow pr-1">{filteredBillingPharmacy.map(s => (<div key={s.id} className="flex justify-between items-center border-b border-slate-50 pb-3"><div><p className="font-bold text-slate-800 text-sm">{s.customerName}</p><p className="text-[9px] text-slate-400 font-bold uppercase">{formatDate(s.date)}</p></div><div className="text-right"><p className="font-black text-indigo-600 text-sm">{CURRENCY} {s.totalAmount}</p></div></div>))}</div></div>
+                 </div>
+              </div>
+           )}
+
+           {view === 'settings' && (
+             <div className="space-y-6 md:space-y-8 animate-in fade-in">
+                <div className="flex flex-col gap-4">
+                  <h1 className="text-2xl font-black text-slate-800">Settings</h1>
+                  <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">
+                    {[
+                      { id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> }, 
+                      { id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> }, 
+                      { id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> },
+                      { id: 'meds', label: 'Medicines', icon: <Pill size={12}/> },
+                      { id: 'scientific', label: 'Scientific', icon: <FlaskConical size={12}/> }, 
+                      { id: 'companies', label: 'Companies', icon: <Building2 size={12}/> }, 
+                      { id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> }, 
+                      { id: 'med_types', label: 'Types', icon: <Tags size={12}/> }
+                    ].map(tab => (<button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}</button>))}
+                  </div>
+                  <div className="relative w-full"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /><input type="text" placeholder={`Search...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold focus:border-blue-500 outline-none transition-all text-sm" /></div>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-in slide-in-from-bottom-4">
+                  <button onClick={() => {
+                    if(settingsTab === 'templates') setShowTemplateForm(true);
+                    else if(settingsTab === 'symptoms') setShowSymptomForm(true);
+                    else if(settingsTab === 'scientific') setShowScientificForm(true);
+                    else if(settingsTab === 'companies') setShowCompanyForm(true);
+                    else if(settingsTab === 'med_categories') setShowCategoryForm(true);
+                    else if(settingsTab === 'med_types') setShowTypeForm(true);
+                    else if(settingsTab === 'vitals') setShowVitalDefForm(true);
+                    else if(settingsTab === 'meds') setShowMedForm(true);
+                  }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]">
+                    <Plus size={32} />
+                    <span className="font-black uppercase tracking-widest text-[9px]">Add New</span>
+                  </button>
+                  {filteredSettingsItems.map(item => (
+                    <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between group">
+                      <div>
+                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
+                        {(item.diagnosis || item.scientificName) && <p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}</p>}
+                        {item.stock !== undefined && <p className={`text-[9px] font-black uppercase mt-2 ${item.stock <= item.reorderLevel ? 'text-rose-500' : 'text-slate-500'}`}>Stock: {item.stock} {item.unit}</p>}
+                      </div>
+                      <div className="mt-4 pt-3 border-t flex justify-end gap-1">
+                         <button onClick={() => { 
+                           if(settingsTab === 'templates') { setEditingTemplate(item); setTempPrescribedMeds(item.prescribedMeds); setFormDiagnosis(item.diagnosis); setShowTemplateForm(true); }
+                           else if(settingsTab === 'symptoms') { setEditingSymptom(item); setShowSymptomForm(true); }
+                           else if(settingsTab === 'scientific') { setEditingScientificName(item); setShowScientificForm(true); }
+                           else if(settingsTab === 'companies') { setEditingCompanyName(item); setShowCompanyForm(true); }
+                           else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); }
+                           else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); }
+                           else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); }
+                           else if(settingsTab === 'meds') { setEditingMedication(item); setShowMedForm(true); }
+                         }} className="p-2 text-slate-300 hover:text-blue-500"><Edit2 size={16}/></button>
+                         <button onClick={() => {
+                           if(settingsTab === 'templates') setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'symptoms') setSymptoms(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'scientific') setScientificNames(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'companies') setCompanyNames(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'med_categories') setMedCategories(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'med_types') setMedTypes(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'vitals') setVitalDefinitions(prev => prev.filter(i => i.id !== item.id));
+                           else if(settingsTab === 'meds') setMedications(prev => prev.filter(i => i.id !== item.id));
+                         }} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+             </div>
+           )}
+        </div>
+      </main>
+
+      {/* Mobile Bottom Navigation */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-6 py-2 flex items-center justify-between z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] print:hidden">
+        <button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all ${view === 'dashboard' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <LayoutDashboard size={20} /><span className="text-[9px] font-black uppercase">Home</span>
+        </button>
+        <button onClick={() => setView('patients')} className={`flex flex-col items-center gap-1 transition-all ${view === 'patients' || view === 'patient-detail' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Users size={20} /><span className="text-[9px] font-black uppercase">Files</span>
+        </button>
+        <button onClick={() => setView('visits')} className={`flex flex-col items-center gap-1 transition-all ${view === 'visits' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <ClipboardList size={20} /><span className="text-[9px] font-black uppercase">Logs</span>
+        </button>
+        <button onClick={() => setView('pharmacy')} className={`flex flex-col items-center gap-1 transition-all ${view === 'pharmacy' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Pill size={20} /><span className="text-[9px] font-black uppercase">Med</span>
+        </button>
+        <button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1 transition-all ${view === 'settings' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <Settings size={20} /><span className="text-[9px] font-black uppercase">Tools</span>
+        </button>
+      </nav>
+
+      {/* --- Modals (Refined for Mobile) --- */}
+      {qrVisit && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4" onClick={() => setQrVisit(null)}>
+           <div className="bg-white w-full h-full sm:h-auto sm:max-w-md sm:rounded-[3.5rem] p-8 md:p-12 shadow-2xl flex flex-col items-center text-center gap-6 animate-in zoom-in" onClick={e => e.stopPropagation()}>
+              <div className="w-full flex justify-end sm:hidden"><button onClick={() => setQrVisit(null)} className="text-slate-400 text-3xl">&times;</button></div>
+              <div className="bg-indigo-50 p-6 rounded-3xl text-indigo-600 shadow-inner"><QrCode size={48} /></div>
+              <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Scan Visit QR</h2><p className="text-slate-400 font-bold text-[9px] uppercase tracking-widest mt-1">Record ID: {qrVisit.id.substring(0,8).toUpperCase()}</p></div>
+              <div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg">
+                <QRCodeCanvas value={`Clinic ID: ${qrVisit.id}`} size={200} level="H" />
+              </div>
+              <button onClick={() => setQrVisit(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
+           </div>
+        </div>
+      )}
+
+      {showTemplateForm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[500] flex items-center justify-center p-0 sm:p-4">
+           <div className="bg-white w-full h-full sm:h-auto sm:max-w-2xl sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
+             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0">
+               <h2 className="text-xl font-black tracking-tight">{editingTemplate ? 'Edit Template' : 'New Template'}</h2>
+               <button onClick={() => { setShowTemplateForm(false); setEditingTemplate(null); setTempPrescribedMeds([]); setFormDiagnosis(''); }} className="text-3xl">&times;</button>
+             </div>
+             <form onSubmit={(e) => {
+               e.preventDefault();
+               const f = new FormData(e.currentTarget);
+               const name = f.get('tplName') as string;
+               const finalPrescribedMeds = tempPrescribedMeds
+                 .map(({searchTerm, ...rest}) => rest)
+                 .filter(pm => pm.medicationId !== '');
+
+               const d: PrescriptionTemplate = { 
+                 id: editingTemplate ? editingTemplate.id : Math.random().toString(36).substr(2, 9),
+                 name, 
+                 diagnosis: formDiagnosis, 
+                 prescribedMeds: finalPrescribedMeds
+               };
+
+               if (editingTemplate) setPrescriptionTemplates(prev => prev.map(i => i.id === editingTemplate.id ? d : i));
+               else setPrescriptionTemplates(prev => [...prev, d]);
+               
+               setShowTemplateForm(false);
+               setEditingTemplate(null);
+               setTempPrescribedMeds([]);
+               setFormDiagnosis('');
+             }} className="p-6 md:p-8 space-y-6 flex-grow overflow-y-auto custom-scrollbar">
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Template Name</label><input required name="tplName" defaultValue={editingTemplate?.name} placeholder="e.g. Cough & Flu" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Diagnosis</label><input name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} placeholder="Default diagnosis" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medications</label><button type="button" onClick={() => setTempPrescribedMeds([...tempPrescribedMeds, { medicationId: '', dosage: '', frequency: '', duration: '', searchTerm: '', quantity: 0 }])} className="text-blue-600 font-black text-[10px] uppercase">+ Add</button></div>
+                  <div className="space-y-3">
+                    {tempPrescribedMeds.map((pm, idx) => {
+                      const selectedMed = medications.find(m => m.id === pm.medicationId);
+                      const isSearching = activeMedSearchIndex === idx;
+                      const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()));
+                      return (
+                        <div key={idx} className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100 flex flex-col gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-grow relative">
+                              <input type="text" placeholder="Search Medicine..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => setActiveMedSearchIndex(idx)} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-sm outline-none bg-transparent" />
+                              {isSearching && (
+                                <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">
+                                  {filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 last:border-none font-bold text-xs">{m.brandName}</button>)) : <div className="p-3 text-slate-300 text-[10px] text-center uppercase">No Match</div>}
+                                </div>
+                              )}
+                            </div>
+                            <button type="button" onClick={() => setTempPrescribedMeds(tempPrescribedMeds.filter((_, i) => i !== idx))} className="text-slate-300"><Trash2 size={16}/></button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                             <input placeholder="Dosage" value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="p-2 bg-white rounded-lg text-xs font-bold border border-slate-200" />
+                             <input type="number" placeholder="Qty" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="p-2 bg-white rounded-lg text-xs font-bold border border-slate-200" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm mt-4">Save Template</button>
+             </form>
+           </div>
+        </div>
+      )}
+
+      {showPatientForm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[500] flex items-center justify-center p-0 sm:p-4">
+           <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
+             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0">
+               <h2 className="text-xl font-black tracking-tight">{editingPatient ? 'Update Profile' : 'Register Patient'}</h2>
+               <button onClick={() => { setShowPatientForm(false); setEditingPatient(null); }} className="text-3xl">&times;</button>
+             </div>
+             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const d = { name: f.get('name') as string, age: parseInt(f.get('age') as string), gender: f.get('gender') as any, phone: f.get('phone') as string, address: f.get('address') as string, allergies: f.get('allergies') as string, chronicConditions: f.get('chronicConditions') as string }; if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); else { const code = `P-${(patients.length + 1).toString().padStart(4, '0')}`; setPatients(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), patientCode: code, ...d }]); } setShowPatientForm(false); setEditingPatient(null); }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Full Name</label><input required name="name" defaultValue={editingPatient?.name} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Age</label><input required type="number" name="age" defaultValue={editingPatient?.age} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Gender</label><select name="gender" defaultValue={editingPatient?.gender} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm"><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></div></div>
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Phone</label><input required name="phone" defaultValue={editingPatient?.phone} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Address</label><textarea required name="address" defaultValue={editingPatient?.address} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" rows={2} /></div>
+                <div className="border-t pt-4 space-y-4">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
+                  <div className="space-y-1"><label className="text-[10px] font-black text-rose-400 uppercase ml-1">Allergies</label><input name="allergies" defaultValue={editingPatient?.allergies} placeholder="None" className="w-full p-4 rounded-xl border-2 border-rose-100 bg-rose-50/20 font-black text-rose-700 text-sm outline-none" /></div>
+                  <div className="space-y-1"><label className="text-[10px] font-black text-amber-500 uppercase ml-1">Chronic Conditions</label><input name="chronicConditions" defaultValue={editingPatient?.chronicConditions} placeholder="None" className="w-full p-4 rounded-xl border-2 border-amber-100 bg-amber-50/20 font-black text-amber-700 text-sm outline-none" /></div>
+                </div>
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Profile</button>
+             </form>
+           </div>
+        </div>
+      )}
+
+      {showVisitForm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[500] flex items-center justify-center p-0 sm:p-4 animate-in slide-in-from-bottom sm:zoom-in">
+          <div className="bg-white w-full h-full sm:h-auto sm:max-w-5xl sm:rounded-[3.5rem] shadow-2xl flex flex-col overflow-hidden">
+             <div className="p-6 md:p-8 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex justify-between items-center shrink-0">
+               <h2 className="text-xl md:text-2xl font-black tracking-tight">{editingVisit ? 'Update Log' : 'Clinical Encounter'}</h2>
+               <button onClick={() => { setShowVisitForm(false); setEditingVisit(null); setTempPrescribedMeds([]); setFormDiagnosis(''); setFormSelectedPatientId(null); setPatientFormSearch(''); setShowPatientResults(false); }} className="text-3xl">&times;</button>
+             </div>
+             <form onSubmit={handleVisitSubmit} className="p-6 md:p-10 space-y-8 md:space-y-10 bg-slate-50/30 flex-grow overflow-y-auto custom-scrollbar">
+                <input type="hidden" name="patientId" value={formSelectedPatientId || ""} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                  <div className="space-y-2 relative">
+                    <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Patient</label>
+                    <input type="text" placeholder="Name or ID..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all" />
+                    {showPatientResults && patientFormResults.length > 0 && (
+                      <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-100 shadow-2xl rounded-2xl z-[500] max-h-48 overflow-y-auto">
+                        {patientFormResults.map(p => (
+                          <button key={p.id} type="button" onClick={() => { setFormSelectedPatientId(p.id); setPatientFormSearch(p.name); setShowPatientResults(false); }} className="w-full text-left px-5 py-3 hover:bg-emerald-50 border-b border-slate-50 font-black text-xs">{p.name} <span className="text-[9px] text-slate-400 opacity-70 ml-2">{p.patientCode}</span></button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visit Date</label><input type="date" name="date" defaultValue={editingVisit?.date || getCurrentIsoDate()} className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm" /></div>
+                  <div className="hidden sm:block space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Patient Code</label><input readOnly value={selectedPatientInForm?.patientCode || "---"} className="w-full p-4 rounded-2xl border-2 border-slate-100 font-black bg-slate-100 text-slate-500 outline-none" /></div>
+                  <div className="hidden sm:block space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Patient Age</label><input readOnly value={selectedPatientInForm?.age !== undefined ? `${selectedPatientInForm.age} Y` : "---"} className="w-full p-4 rounded-2xl border-2 border-slate-100 font-black bg-slate-100 text-slate-500 outline-none" /></div>
+                </div>
+
+                {selectedPatientInForm && (selectedPatientInForm.allergies || selectedPatientInForm.chronicConditions) && (
+                  <div className="bg-rose-50 border-2 border-rose-200 p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] flex flex-col sm:flex-row gap-4 md:gap-6 animate-in zoom-in">
+                    {selectedPatientInForm.allergies && (
+                      <div className="flex items-start gap-3 flex-1">
+                        <ShieldAlert className="text-rose-600 shrink-0" size={20} />
+                        <div><p className="text-[8px] md:text-[9px] font-black uppercase text-rose-400">Allergy Warning</p><p className="text-xs font-black text-rose-800">{selectedPatientInForm.allergies}</p></div>
+                      </div>
+                    )}
+                    {selectedPatientInForm.chronicConditions && (
+                      <div className="flex items-start gap-3 flex-1 border-rose-100 border-t sm:border-t-0 sm:border-l sm:pl-6 pt-3 sm:pt-0">
+                        <Activity className="text-amber-600 shrink-0" size={20} />
+                        <div><p className="text-[8px] md:text-[9px] font-black uppercase text-amber-500">Chronic Alert</p><p className="text-xs font-black text-amber-800">{selectedPatientInForm.chronicConditions}</p></div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <h3 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Activity size={14} className="text-emerald-500" /> Vitals Markers</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">{vitalDefinitions.map(v => (<div key={v.id} className="relative"><input type="text" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span></div>))}</div>
+                </div>
+                
+                <div className="bg-indigo-50/40 p-5 rounded-[2rem] border-2 border-indigo-100/50 space-y-4">
+                  <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><LayoutTemplate size={14}/> Templates</h3></div>
+                  <div className="flex flex-wrap gap-2">
+                    {prescriptionTemplates.map(tpl => (<button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className="px-3 py-1.5 bg-white border border-indigo-100 rounded-lg text-[10px] font-bold text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap"><Copy size={10}/> {tpl.name}</button>))}
+                    {prescriptionTemplates.length === 0 && <p className="text-[10px] text-slate-300 font-bold uppercase">No templates</p>}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-10">
+                  <div className="space-y-6">
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1 flex items-center gap-2"><Droplets size={14} className="text-blue-500" /> Symptoms</label><div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-3 md:p-4 border-2 border-slate-100 rounded-2xl md:rounded-3xl bg-white shadow-inner">{symptoms.map(s => (<label key={s.id} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-100 cursor-pointer hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 group"><input type="checkbox" name="selectedSymptoms" value={s.label} defaultChecked={editingVisit?.symptoms?.includes(s.label)} className="hidden" /><span className="text-[10px] font-black text-slate-500 group-has-[:checked]:text-blue-700">{s.label}</span></label>))}</div></div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Prescription</label><button type="button" onClick={() => setTempPrescribedMeds([...tempPrescribedMeds, { medicationId: '', dosage: '', frequency: '', duration: '', searchTerm: '', quantity: 0 }])} className="text-blue-600 font-black text-[10px] uppercase hover:underline">+ Add Med</button></div>
+                    <div className="space-y-3">
+                      {tempPrescribedMeds.map((pm, idx) => { 
+                        const selectedMed = medications.find(m => m.id === pm.medicationId); 
+                        const isSearching = activeMedSearchIndex === idx; 
+                        const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
+                        return (
+                        <div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all border-slate-100 shadow-sm`}>
+                          <div className="flex items-center gap-3">
+                            <div className="flex-grow relative">
+                              <input type="text" placeholder="Search..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-xs outline-none bg-transparent" />
+                              {isSearching && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-xl z-[400] max-h-40 overflow-y-auto">{filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate">{m.brandName}</button>)) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}</div>)}
+                            </div>
+                            <button type="button" onClick={() => { const newList = tempPrescribedMeds.filter((_, i) => i !== idx); setTempPrescribedMeds(newList); }} className="text-slate-300"><Trash2 size={14}/></button>
+                          </div>
+                          <div className="flex gap-2 items-center"><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div></div>
+                        </div>); 
+                      })}
+                      {tempPrescribedMeds.length === 0 && (<div className="py-6 border-2 border-dashed border-slate-100 rounded-2xl text-center text-slate-300 font-black uppercase text-[9px]">No meds added</div>)}
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Fee ({CURRENCY})</label><input type="number" name="feeAmount" defaultValue={editingVisit?.feeAmount || 0} className="w-full p-4 rounded-xl border-2 border-slate-100 font-black text-sm" /></div><div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Status</label><select name="paymentStatus" defaultValue={editingVisit?.paymentStatus || "Paid"} className="w-full p-4 rounded-xl border-2 border-slate-100 font-black text-sm"><option value="Paid">Paid</option><option value="Pending">Pending</option></select></div></div>
+                <button type="submit" className="w-full bg-emerald-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"><CheckCircle2 size={20} /> Finalize & Print</button>
+             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Other Settings Modals - Simplified for brevity but still touch friendly */}
+      {[
+        { show: showSymptomForm, set: setShowSymptomForm, editing: editingSymptom, setEditing: setEditingSymptom, title: 'Symptom', color: 'emerald', list: symptoms, setList: setSymptoms },
+        { show: showScientificForm, set: setShowScientificForm, editing: editingScientificName, setEditing: setEditingScientificName, title: 'Scientific Name', color: 'indigo', list: scientificNames, setList: setScientificNames },
+        { show: showCompanyForm, set: setShowCompanyForm, editing: editingCompanyName, setEditing: setEditingCompanyName, title: 'Company', color: 'amber', list: companyNames, setList: setCompanyNames },
+        { show: showCategoryForm, set: setShowCategoryForm, editing: editingMedCategory, setEditing: setEditingMedCategory, title: 'Category', color: 'indigo', list: medCategories, setList: setMedCategories },
+        { show: showTypeForm, set: setShowTypeForm, editing: editingMedType, setEditing: setEditingMedType, title: 'Med Type', color: 'blue', list: medTypes, setList: setMedTypes }
+      ].map(modal => modal.show && (
+        <div key={modal.title} className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4">
+           <div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden">
+             <div className={`p-5 bg-${modal.color}-600 text-white flex justify-between items-center`}>
+               <h2 className="font-black uppercase tracking-widest text-[10px]">{modal.editing ? `Edit ${modal.title}` : `New ${modal.title}`}</h2>
+               <button onClick={() => { modal.set(false); modal.setEditing(null); }} className="text-xl">&times;</button>
+             </div>
+             <form onSubmit={(e) => {
+               e.preventDefault();
+               const f = new FormData(e.currentTarget);
+               const label = f.get('label') as string;
+               if (modal.editing) modal.setList((prev:any) => prev.map((i:any) => i.id === modal.editing.id ? { ...i, label } : i));
+               else if (label) modal.setList((prev:any) => [...prev, { id: Math.random().toString(36).substr(2, 9), label }]);
+               modal.set(false);
+               modal.setEditing(null);
+             }} className="p-5 space-y-4">
+                <input required name="label" defaultValue={modal.editing?.label} placeholder={`${modal.title} name...`} className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" autoFocus />
+                <button type="submit" className={`w-full bg-${modal.color}-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs`}>Save</button>
+             </form>
+           </div>
+        </div>
+      ))}
+
+      {showVitalDefForm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4">
+           <div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden">
+             <div className="p-5 bg-rose-600 text-white flex justify-between items-center">
+               <h2 className="font-black uppercase tracking-widest text-[10px]">{editingVitalDefinition ? 'Edit Vital' : 'New Vital'}</h2>
+               <button onClick={() => { setShowVitalDefForm(false); setEditingVitalDefinition(null); }} className="text-xl">&times;</button>
+             </div>
+             <form onSubmit={(e) => {
+               e.preventDefault();
+               const f = new FormData(e.currentTarget);
+               const label = f.get('label') as string;
+               const unit = f.get('unit') as string;
+               if (editingVitalDefinition) setVitalDefinitions(prev => prev.map(i => i.id === editingVitalDefinition.id ? { ...i, label, unit } : i));
+               else if (label && unit) setVitalDefinitions(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), label, unit }]);
+               setShowVitalDefForm(false);
+               setEditingVitalDefinition(null);
+             }} className="p-5 space-y-4">
+                <input required name="label" defaultValue={editingVitalDefinition?.label} placeholder="Metric Name" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" />
+                <input required name="unit" defaultValue={editingVitalDefinition?.unit} placeholder="Unit (e.g. kg)" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" />
+                <button type="submit" className="w-full bg-rose-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs">Save</button>
+             </form>
+           </div>
+        </div>
+      )}
+
+      {showMedForm && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4">
+           <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:zoom-in">
+             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0">
+               <h2 className="text-xl font-black tracking-tight">{editingMedication ? 'Edit Med' : 'Register Med'}</h2>
+               <button onClick={() => { setShowMedForm(false); setEditingMedication(null); }} className="text-3xl">&times;</button>
+             </div>
+             <form onSubmit={(e) => {
+               e.preventDefault();
+               const f = new FormData(e.currentTarget);
+               const scientificName = f.get('scientificName') as string;
+               const d = { 
+                 brandName: f.get('brandName') as string, 
+                 scientificName: scientificName, 
+                 type: f.get('type') as string, 
+                 unit: f.get('unit') as string,
+                 strength: f.get('strength') as string, 
+                 category: f.get('category') as string, 
+                 stock: parseInt(f.get('stock') as string) || 0, 
+                 reorderLevel: parseInt(f.get('reorderLevel') as string) || 0,
+                 pricePerUnit: parseFloat(f.get('price') as string) || 0,
+                 companyName: f.get('companyName') as string
+               };
+               if (editingMedication) setMedications(prev => prev.map(i => i.id === editingMedication.id ? { ...i, ...d } : i));
+               else setMedications(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), ...d }]);
+               setShowMedForm(false);
+               setEditingMedication(null);
+             }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
+                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Brand</label><input required name="brandName" defaultValue={editingMedication?.brandName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Scientific</label><select name="scientificName" defaultValue={editingMedication?.scientificName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{scientificNames.map(n => <option key={n.id} value={n.label}>{n.label}</option>)}</select></div></div>
+                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Cat</label><select name="category" defaultValue={editingMedication?.category} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medCategories.map(cat => <option key={cat.id} value={cat.label}>{cat.label}</option>)}</select></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Packaging</label><input required name="unit" defaultValue={editingMedication?.unit} placeholder="e.g. Tab" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div>
+                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Strength</label><input required name="strength" defaultValue={editingMedication?.strength} placeholder="500mg" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select name="type" defaultValue={editingMedication?.type} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medTypes.map(t => <option key={t.id} value={t.label}>{t.label}</option>)}</select></div></div>
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Company</label><select name="companyName" defaultValue={editingMedication?.companyName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{companyNames.map(c => <option key={c.id} value={c.label}>{c.label}</option>)}</select></div>
+                <div className="grid grid-cols-3 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Price</label><input required type="number" name="price" defaultValue={editingMedication?.pricePerUnit} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Stock</label><input required type="number" name="stock" defaultValue={editingMedication?.stock} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Min</label><input required type="number" name="reorderLevel" defaultValue={editingMedication?.reorderLevel} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div>
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Med</button>
+             </form>
+           </div>
+        </div>
+      )}
+
+      {/* 80mm Thermal Receipt Print View */}
+      <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
+        {printingVisit && (() => {
+          const p = patients.find(pat => pat.id === printingVisit.patientId);
+          return (
+            <div className="w-full text-center space-y-4 py-4 px-2">
+              <div className="border-b-2 border-black pb-2"><h1 className="text-2xl font-black uppercase tracking-tighter">SmartClinic</h1><p className="text-[10px] font-bold uppercase tracking-widest">Medical Record Receipt</p></div>
+              <div className="text-left space-y-2 text-[12px] pt-2">
+                <div className="flex justify-between border-b border-dashed border-gray-400 pb-1"><span className="font-bold">Date:</span><span>{formatDate(printingVisit.date)}</span></div>
+                <div className="flex justify-between border-b border-dashed border-gray-400 pb-1"><span className="font-bold">Patient:</span><span className="font-black">{p?.name}</span></div>
+                <div className="space-y-1 pt-2"><p className="font-bold border-b border-gray-200">Symptoms:</p><p className="italic pl-2 py-1">{printingVisit.symptoms || 'None'}</p></div>
+              </div>
+              <div className="text-left pt-4">
+                <p className="font-bold text-[14px] border-b-2 border-black mb-2 uppercase italic">Prescription</p>
+                <div className="space-y-3">
+                  {printingVisit.prescribedMeds.map((pm, idx) => {
+                    const med = medications.find(m => m.id === pm.medicationId);
+                    return (med && (<div key={idx} className="flex justify-between items-start text-[13px] border-b border-gray-50 pb-1"><div className="flex-grow"><span className="font-black">{idx + 1}. {med.brandName}</span><span className="text-[10px] block text-gray-500">{med.strength}</span></div><span className="shrink-0 bg-gray-100 px-2 rounded-md font-bold">Qty: {pm.quantity}</span></div>));
+                  })}
+                </div>
+              </div>
+              <div className="pt-10 border-t border-black mt-10"><p className="text-[10px] font-black uppercase tracking-widest">Thank You</p></div>
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
+};
+
+export default App;

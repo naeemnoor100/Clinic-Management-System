@@ -1,0 +1,17 @@
+{
+  "name": "SmartClinic Management System",
+  "short_name": "SmartClinic",
+  "description": "Comprehensive clinic management and patient record system.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

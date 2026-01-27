@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SmartClinic</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2563eb">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400..700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom Font Face for Alvi Nastaleeq if available locally or via common system paths */
+        @font-face {
+            font-family: 'Alvi Nastaleeq';
+            src: local('Alvi Nastaleeq'), local('Alvi_Nastaleeq');
+        }
+
+        :root {
+            --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+            --font-urdu: 'Alvi Nastaleeq', 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif;
+        }
+        
+        body {
+            font-family: var(--font-sans);
+            background-color: #f8fafc;
+        }
+
+        /* Apply Nastaleeq specifically to elements that likely contain Urdu or where high-quality typography is needed */
+        h1, h2, h3, .urdu-text, input, textarea, select {
+            font-family: var(--font-sans), var(--font-urdu);
+        }
+
+        @media print {
+            @page {
+                size: 80mm auto;
+                margin: 0;
+            }
+            body {
+                width: 80mm;
+                margin: 0;
+                padding: 0;
+                background: white;
+                -webkit-print-color-adjust: exact;
+            }
+            .no-print {
+                display: none !important;
+            }
+            #root > *:not(.print-only) {
+                display: none !important;
+            }
+        }
+        
+        /* Custom scrollbar for the timeline */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 10px;
+        }
+
+        /* Optimize Nastaleeq rendering */
+        textarea, input {
+            line-height: 1.8 !important;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "@google/genai": "https://esm.sh/@google/genai@1.37.0",
+    "lucide-react": "https://esm.sh/lucide-react@0.475.0?deps=react@18.2.0",
+    "qrcode.react": "https://esm.sh/qrcode.react@3.1.0?deps=react@18.2.0"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                try {
+                    const swUrl = new URL('./sw.js', window.location.href);
+                    if (swUrl.origin === window.location.origin) {
+                        navigator.serviceWorker.register(swUrl.pathname)
+                            .then(reg => console.log('Service Worker registered successfully', reg.scope))
+                            .catch(err => {
+                                if (err.name === 'SecurityError') {
+                                    console.warn('Service Worker registration skipped: Origin restriction in effect.');
+                                } else {
+                                    console.error('Service Worker registration failed:', err);
+                                }
+                            });
+                    }
+                } catch (e) {
+                    console.debug('Service Worker initialization check skipped:', e.message);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
