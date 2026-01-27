@@ -765,6 +765,13 @@ const App: React.FC = () => {
     return allergiesArray.some(a => a === medSci || a === medBrand);
   };
 
+  // Logic to find brands for a specific scientific name
+  const getBrandsForScientific = (scientificLabel: string) => {
+    return medications
+      .filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -1220,11 +1227,29 @@ const App: React.FC = () => {
                     <Plus size={32} />
                     <span className="font-black uppercase tracking-widest text-[9px]">Add New</span>
                   </button>
-                  {filteredSettingsItems.map(item => (
+                  {filteredSettingsItems.map(item => {
+                    const brands = settingsTab === 'scientific' ? getBrandsForScientific(item.label) : [];
+                    return (
                     <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between group">
                       <div>
                         <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
                         {(item.diagnosis || item.scientificName) && <p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}</p>}
+                        
+                        {/* Display brands below Scientific Name */}
+                        {settingsTab === 'scientific' && brands.length > 0 && (
+                          <div className="mt-3">
+                            <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Available Brands</p>
+                            <div className="flex flex-wrap gap-1">
+                              {brands.map((b, idx) => (
+                                <span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {settingsTab === 'scientific' && brands.length === 0 && (
+                           <p className="text-[8px] font-bold text-slate-300 italic mt-2 uppercase">No registered brands</p>
+                        )}
+
                         {item.stock !== undefined && <p className={`text-[9px] font-black uppercase mt-2 ${item.stock <= item.reorderLevel ? 'text-rose-500' : 'text-slate-500'}`}>Stock: {item.stock} {item.unit}</p>}
                       </div>
                       <div className="mt-4 pt-3 border-t flex justify-end gap-1">
@@ -1250,7 +1275,7 @@ const App: React.FC = () => {
                          }} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
                       </div>
                     </div>
-                  ))}
+                  )})}
                 </div>
              </div>
            )}
