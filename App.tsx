@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -744,6 +745,21 @@ const App: React.FC = () => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [selectedPatientId, visits, historySearchTerm, medications]);
 
+  // New logic to check medicine allergy for a patient
+  const checkMedAllergy = (medId: string) => {
+    const p = selectedPatientInForm;
+    if (!p || !p.allergies || !medId) return false;
+    const med = medications.find(m => m.id === medId);
+    if (!med) return false;
+
+    // Split patient allergies (which are scientific names from registration form)
+    const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+    const medSci = med.scientificName.toLowerCase().trim();
+    const medBrand = med.brandName.toLowerCase().trim();
+
+    return allergiesArray.some(a => a === medSci || a === medBrand);
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -1485,8 +1501,17 @@ const App: React.FC = () => {
                         const selectedMed = medications.find(m => m.id === pm.medicationId); 
                         const isSearching = activeMedSearchIndex === idx; 
                         const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
+                        
+                        // Allergy check for this specific medicine row
+                        const isAllergic = pm.medicationId ? checkMedAllergy(pm.medicationId) : false;
+
                         return (
-                        <div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all border-slate-100 shadow-sm`}>
+                        <div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all ${isAllergic ? 'border-red-500 bg-red-50 shadow-red-100' : 'border-slate-100 shadow-sm'}`}>
+                          {isAllergic && (
+                            <div className="flex items-center gap-2 text-red-600 font-black text-[9px] md:text-[10px] uppercase animate-pulse">
+                              <ShieldAlert size={14} /> Allergy Risk Detected!
+                            </div>
+                          )}
                           <div className="flex items-center gap-3">
                             <div className="flex-grow relative">
                               <input type="text" placeholder="Search..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-xs outline-none bg-transparent" />
