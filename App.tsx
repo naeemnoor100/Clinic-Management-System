@@ -46,8 +46,8 @@ import {
   Menu
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types.ts';
-import { getPatientHistorySummary } from './services/gemini.ts';
+import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
+import { getPatientHistorySummary } from './services/gemini';
 
 // --- Utility: Persistence ---
 const saveToLocal = (key: string, data: any) => localStorage.setItem(`smartclinic_${key}`, JSON.stringify(data));

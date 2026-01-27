@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { Patient, Visit, Medication } from "../types.ts";
+import { Patient, Visit, Medication } from "../types";
 
 // Always use a named parameter and direct process.env.API_KEY reference
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
