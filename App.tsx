@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -44,7 +43,8 @@ import {
   Copy,
   AlertCircle,
   ShieldAlert,
-  Menu
+  Menu,
+  User
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -227,6 +227,7 @@ const App: React.FC = () => {
   
   const [printingVisit, setPrintingVisit] = useState<Visit | null>(null);
   const [qrVisit, setQrVisit] = useState<Visit | null>(null);
+  const [qrPatient, setQrPatient] = useState<Patient | null>(null);
   const [showPatientForm, setShowPatientForm] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
   const [showVisitForm, setShowVisitForm] = useState(false);
@@ -274,6 +275,7 @@ const App: React.FC = () => {
         setShowVitalDefForm(false);
         setShowTemplateForm(false);
         setQrVisit(null);
+        setQrPatient(null);
         setPrintingVisit(null);
         setEditingVisit(null);
         setEditingPatient(null);
@@ -712,10 +714,13 @@ const App: React.FC = () => {
     const medDetails = visit.prescribedMeds.map(pm => {
       const med = medications.find(m => m.id === pm.medicationId);
       const name = med?.brandName || 'Unknown';
-      const duration = pm.duration ? ` (Dur: ${pm.duration})` : '';
-      return `${name}${duration}`;
+      return `${name} x ${pm.quantity || 0}`;
     }).join(', ');
     return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medDetails || 'None'}`;
+  };
+
+  const getPatientQrData = (p: Patient) => {
+    return `Patient Profile\nName: ${p.name}\nCode: ${p.patientCode}\nPhone: ${p.phone}\nAddress: ${p.address}\nAllergies: ${p.allergies || 'None'}\nChronic: ${p.chronicConditions || 'None'}`;
   };
 
   const filteredAllergyScientificNames = useMemo(() => {
@@ -902,6 +907,7 @@ const App: React.FC = () => {
                            <div className="flex justify-between items-start gap-4">
                              <h2 className="text-2xl md:text-4xl font-black text-slate-800 leading-tight">{p.name}</h2>
                              <div className="flex gap-1 no-print shrink-0">
+                               <button onClick={() => setQrPatient(p)} className="p-2.5 bg-indigo-50 text-indigo-400 hover:text-indigo-600 rounded-xl" title="Patient Profile QR"><QrCode size={18}/></button>
                                <button onClick={() => { setEditingPatient(p); setShowPatientForm(true); }} className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl" title="Edit Info"><Edit2 size={18}/></button>
                                <button onClick={() => handleDeletePatient(p.id)} className="p-2.5 bg-red-50 text-red-400 hover:text-red-600 rounded-xl" title="Delete"><Trash2 size={18}/></button>
                              </div>
@@ -1284,6 +1290,23 @@ const App: React.FC = () => {
                 {getVisitQrData(qrVisit)}
               </div>
               <button onClick={() => setQrVisit(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
+           </div>
+        </div>
+      )}
+
+      {qrPatient && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4" onClick={() => setQrPatient(null)}>
+           <div className="bg-white w-full h-full sm:h-auto sm:max-w-md sm:rounded-[3.5rem] p-8 md:p-12 shadow-2xl flex flex-col items-center text-center gap-6 animate-in zoom-in" onClick={e => e.stopPropagation()}>
+              <div className="w-full flex justify-end sm:hidden"><button onClick={() => setQrPatient(null)} className="text-slate-400 text-3xl">&times;</button></div>
+              <div className="bg-blue-50 p-6 rounded-3xl text-blue-600 shadow-inner"><User size={48} /></div>
+              <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Patient Profile QR</h2></div>
+              <div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg">
+                <QRCodeCanvas value={getPatientQrData(qrPatient)} size={200} level="M" />
+              </div>
+              <div className="text-left w-full text-xs text-slate-500 bg-slate-50 p-4 rounded-2xl whitespace-pre-wrap font-mono">
+                {getPatientQrData(qrPatient)}
+              </div>
+              <button onClick={() => setQrPatient(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
            </div>
         </div>
       )}
