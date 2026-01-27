@@ -203,6 +203,7 @@ const App: React.FC = () => {
   const [visitSearchTerm, setVisitSearchTerm] = useState('');
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [settingsSearchTerm, setSettingsSearchTerm] = useState('');
+  const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [billingDate, setBillingDate] = useState<string>(''); 
   
   const [patients, setPatients] = useState<Patient[]>(() => getFromLocal('patients', dummyPatients));
@@ -612,18 +613,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteAllPatients = () => {
-    if (window.confirm("CRITICAL WARNING: This will permanently delete ALL patient records and their complete medical history. This action cannot be undone. Are you absolutely sure?")) {
-      if (window.confirm("FINAL CONFIRMATION: Are you really sure you want to delete the entire patient database?")) {
-        setPatients([]);
-        setVisits([]);
-        setSelectedPatientId(null);
-        setView('patients');
-        alert("All patient records have been deleted.");
-      }
-    }
-  };
-
   const filteredVisits = useMemo(() => {
     const sTerm = visitSearchTerm.toLowerCase();
     return visits.filter(v => {
@@ -733,6 +722,28 @@ const App: React.FC = () => {
     return scientificNames.filter(sn => sn.label.toLowerCase().includes(s));
   }, [scientificNames, allergySearchTerm]);
 
+  // Search logic for visit history within patient detail view
+  const filteredHistory = useMemo(() => {
+    if (!selectedPatientId) return [];
+    const s = historySearchTerm.toLowerCase();
+    return visits
+      .filter(v => v.patientId === selectedPatientId)
+      .filter(v => {
+        if (!s) return true;
+        const medNames = v.prescribedMeds.map(pm => {
+          const med = medications.find(m => m.id === pm.medicationId);
+          return `${med?.brandName || ''} ${med?.scientificName || ''}`;
+        }).join(' ');
+        return (
+          v.diagnosis.toLowerCase().includes(s) ||
+          v.symptoms.toLowerCase().includes(s) ||
+          v.date.includes(s) ||
+          medNames.toLowerCase().includes(s)
+        );
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [selectedPatientId, visits, historySearchTerm, medications]);
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -815,7 +826,7 @@ const App: React.FC = () => {
                     const lastVisit = patientVisits[0];
 
                     return (
-                   <div key={p.id} onClick={() => { setSelectedPatientId(p.id); setView('patient-detail'); setDetailTab('history'); }} className="bg-white p-5 md:p-6 rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all group relative flex flex-col justify-between min-h-[140px]">
+                   <div key={p.id} onClick={() => { setSelectedPatientId(p.id); setView('patient-detail'); setDetailTab('history'); setHistorySearchTerm(''); }} className="bg-white p-5 md:p-6 rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all group relative flex flex-col justify-between min-h-[140px]">
                      <div>
                        <div className="flex items-center gap-4">
                          <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-black shrink-0">{p.name[0]}</div>
@@ -915,11 +926,24 @@ const App: React.FC = () => {
 
                          {detailTab === 'history' && (
                            <div className="space-y-4 animate-in fade-in">
-                              <h3 className="text-lg md:text-xl font-black text-slate-800">Visit History</h3>
+                              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                <h3 className="text-lg md:text-xl font-black text-slate-800">Visit History</h3>
+                                <div className="relative w-full sm:w-64 no-print">
+                                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                  <input 
+                                    type="text" 
+                                    placeholder="Filter diagnosis, meds..." 
+                                    value={historySearchTerm} 
+                                    onChange={(e) => setHistorySearchTerm(e.target.value)} 
+                                    className="w-full pl-10 pr-4 py-2 rounded-xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-xs" 
+                                  />
+                                  {historySearchTerm && (
+                                    <button onClick={() => setHistorySearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X size={14}/></button>
+                                  )}
+                                </div>
+                              </div>
                               <div className="space-y-3 md:space-y-4">
-                                 {visits.filter(v => v.patientId === selectedPatientId)
-                                   .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                                   .map(v => (
+                                 {filteredHistory.map(v => (
                                    <div key={v.id} className="bg-white p-5 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4 group">
                                       <div className="flex-grow">
                                         <p className="text-[10px] text-slate-400 mb-1 font-bold">{formatDate(v.date)}</p>
@@ -929,18 +953,28 @@ const App: React.FC = () => {
                                             <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-black rounded-full uppercase tracking-tighter">{s}</span>
                                           )) : <span className="text-slate-300 italic text-[10px]">No symptoms recorded</span>}
                                         </div>
+                                        <div className="mt-3 flex flex-wrap gap-2">
+                                          {v.prescribedMeds.map((pm, i) => {
+                                            const med = medications.find(m => m.id === pm.medicationId);
+                                            return med ? (
+                                              <span key={i} className="px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[10px] font-bold text-slate-600">{med.brandName} <span className="text-blue-500">×{pm.quantity}</span></span>
+                                            ) : null;
+                                          })}
+                                        </div>
                                       </div>
-                                      <div className="flex gap-2 shrink-0 md:opacity-0 group-hover:opacity-100 transition-opacity justify-end">
+                                      <div className="flex gap-2 shrink-0 md:opacity-0 group-hover:opacity-100 transition-opacity justify-end no-print">
                                          <button onClick={() => handleWhatsAppShare(v, p)} className="bg-green-50 text-green-600 p-2.5 rounded-lg hover:bg-green-100 transition-all" title="Share WhatsApp"><MessageCircle size={16}/></button>
                                          <button onClick={() => setQrVisit(v)} className="bg-indigo-50 text-indigo-600 p-2.5 rounded-lg hover:bg-indigo-100 transition-all" title="QR Code"><QrCode size={16}/></button>
                                          <button onClick={() => triggerPrint(v)} className="bg-blue-50 text-blue-600 p-2.5 rounded-lg hover:bg-blue-100 transition-all" title="Print"><Printer size={16}/></button>
                                       </div>
                                    </div>
                                  ))}
-                                 {visits.filter(v => v.patientId === selectedPatientId).length === 0 && (
+                                 {filteredHistory.length === 0 && (
                                    <div className="py-12 md:py-20 text-center bg-white rounded-3xl md:rounded-[2rem] border-2 border-dashed border-slate-100 px-4">
                                       <History size={40} className="mx-auto text-slate-200 mb-4"/>
-                                      <p className="text-slate-400 font-bold text-sm">No clinical history found for this patient.</p>
+                                      <p className="text-slate-400 font-bold text-sm">
+                                        {historySearchTerm ? `No results for "${historySearchTerm}"` : 'No clinical history found for this patient.'}
+                                      </p>
                                    </div>
                                  )}
                               </div>
@@ -1220,7 +1254,7 @@ const App: React.FC = () => {
         </button>
       </nav>
 
-      {/* --- Modals (Refined for Mobile) --- */}
+      {/* --- Modals --- */}
       {qrVisit && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4" onClick={() => setQrVisit(null)}>
            <div className="bg-white w-full h-full sm:h-auto sm:max-w-md sm:rounded-[3.5rem] p-8 md:p-12 shadow-2xl flex flex-col items-center text-center gap-6 animate-in zoom-in" onClick={e => e.stopPropagation()}>
