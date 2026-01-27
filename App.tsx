@@ -255,6 +255,9 @@ const App: React.FC = () => {
   const [patientFormSearch, setPatientFormSearch] = useState('');
   const [showPatientResults, setShowPatientResults] = useState(false);
 
+  // New state for Allergy Search in Patient Form
+  const [allergySearchTerm, setAllergySearchTerm] = useState('');
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -276,6 +279,7 @@ const App: React.FC = () => {
         setFormSelectedPatientId(null);
         setPatientFormSearch('');
         setShowPatientResults(false);
+        setAllergySearchTerm('');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -715,9 +719,19 @@ const App: React.FC = () => {
 
   const getVisitQrData = (visit: Visit) => {
     const patient = patients.find(p => p.id === visit.patientId);
-    const medNames = visit.prescribedMeds.map(pm => medications.find(m => m.id === pm.medicationId)?.brandName || 'Unknown').join(', ');
-    return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medNames || 'None'}`;
+    const medDetails = visit.prescribedMeds.map(pm => {
+      const med = medications.find(m => m.id === pm.medicationId);
+      const name = med?.brandName || 'Unknown';
+      const duration = pm.duration ? ` (Dur: ${pm.duration})` : '';
+      return `${name}${duration}`;
+    }).join(', ');
+    return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medDetails || 'None'}`;
   };
+
+  const filteredAllergyScientificNames = useMemo(() => {
+    const s = allergySearchTerm.toLowerCase();
+    return scientificNames.filter(sn => sn.label.toLowerCase().includes(s));
+  }, [scientificNames, allergySearchTerm]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
@@ -1297,16 +1311,70 @@ const App: React.FC = () => {
            <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
              <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0">
                <h2 className="text-xl font-black tracking-tight">{editingPatient ? 'Update Profile' : 'Register Patient'}</h2>
-               <button onClick={() => { setShowPatientForm(false); setEditingPatient(null); }} className="text-3xl">&times;</button>
+               <button onClick={() => { setShowPatientForm(false); setEditingPatient(null); setAllergySearchTerm(''); }} className="text-3xl">&times;</button>
              </div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const d = { name: f.get('name') as string, age: parseInt(f.get('age') as string), gender: f.get('gender') as any, phone: f.get('phone') as string, address: f.get('address') as string, allergies: f.get('allergies') as string, chronicConditions: f.get('chronicConditions') as string }; if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); else { const code = `P-${(patients.length + 1).toString().padStart(4, '0')}`; setPatients(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), patientCode: code, ...d }]); } setShowPatientForm(false); setEditingPatient(null); }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
+             <form onSubmit={(e) => { 
+               e.preventDefault(); 
+               const f = new FormData(e.currentTarget); 
+               const selectedAllergies = (f.getAll('allergyScientificNames') as string[]).join(', ');
+               const d = { 
+                 name: f.get('name') as string, 
+                 age: parseInt(f.get('age') as string), 
+                 gender: f.get('gender') as any, 
+                 phone: f.get('phone') as string, 
+                 address: f.get('address') as string, 
+                 allergies: selectedAllergies, 
+                 chronicConditions: f.get('chronicConditions') as string 
+               }; 
+               if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); 
+               else { 
+                 const code = `P-${(patients.length + 1).toString().padStart(4, '0')}`; 
+                 setPatients(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), patientCode: code, ...d }]); 
+               } 
+               setShowPatientForm(false); 
+               setEditingPatient(null); 
+               setAllergySearchTerm('');
+             }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Full Name</label><input required name="name" defaultValue={editingPatient?.name} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
                 <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Age</label><input required type="number" name="age" defaultValue={editingPatient?.age} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Gender</label><select name="gender" defaultValue={editingPatient?.gender} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm"><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></div></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Phone</label><input required name="phone" defaultValue={editingPatient?.phone} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Address</label><textarea required name="address" defaultValue={editingPatient?.address} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" rows={2} /></div>
+                
                 <div className="border-t pt-4 space-y-4">
                   <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
-                  <div className="space-y-1"><label className="text-[10px] font-black text-rose-400 uppercase ml-1">Allergies</label><input name="allergies" defaultValue={editingPatient?.allergies} placeholder="None" className="w-full p-4 rounded-xl border-2 border-rose-100 bg-rose-50/20 font-black text-rose-700 text-sm outline-none" /></div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-rose-400 uppercase ml-1 flex items-center justify-between">
+                      Patient Allergies 
+                      <span className="text-[8px] opacity-60">Selection of Scientific Names</span>
+                    </label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-3 text-slate-300" size={12} />
+                      <input 
+                        type="text" 
+                        placeholder="Search Allergies..." 
+                        value={allergySearchTerm}
+                        onChange={(e) => setAllergySearchTerm(e.target.value)}
+                        className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-100 bg-slate-50 text-[10px] font-bold focus:border-rose-300 outline-none"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-3 border-2 border-rose-100/30 rounded-2xl bg-rose-50/10 shadow-inner">
+                      {filteredAllergyScientificNames.map(sn => (
+                        <label key={sn.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 cursor-pointer hover:border-rose-300 has-[:checked]:bg-rose-50 has-[:checked]:border-rose-500 group transition-all">
+                          <input 
+                            type="checkbox" 
+                            name="allergyScientificNames" 
+                            value={sn.label} 
+                            defaultChecked={editingPatient?.allergies?.split(', ').includes(sn.label)} 
+                            className="hidden" 
+                          />
+                          <span className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{sn.label}</span>
+                        </label>
+                      ))}
+                      {filteredAllergyScientificNames.length === 0 && (
+                        <p className="col-span-2 text-center text-[9px] text-slate-300 py-4 uppercase font-bold">No scientific names found</p>
+                      )}
+                    </div>
+                  </div>
                   <div className="space-y-1"><label className="text-[10px] font-black text-amber-500 uppercase ml-1">Chronic Conditions</label><input name="chronicConditions" defaultValue={editingPatient?.chronicConditions} placeholder="None" className="w-full p-4 rounded-xl border-2 border-amber-100 bg-amber-50/20 font-black text-amber-700 text-sm outline-none" /></div>
                 </div>
                 <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Profile</button>
@@ -1504,7 +1572,12 @@ const App: React.FC = () => {
       <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
         {printingVisit && (() => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
-          const medNames = printingVisit.prescribedMeds.map(pm => medications.find(m => m.id === pm.medicationId)?.brandName || 'Unknown').join(', ');
+          const medDetails = printingVisit.prescribedMeds.map(pm => {
+            const med = medications.find(m => m.id === pm.medicationId);
+            const name = med?.brandName || 'Unknown';
+            const duration = pm.duration ? ` (Dur: ${pm.duration})` : '';
+            return `${name}${duration}`;
+          }).join(', ');
           return (
             <div className="w-full p-4 space-y-4 text-[13px]">
               <div className="text-center border-b-2 border-black pb-4 mb-4">
@@ -1516,7 +1589,7 @@ const App: React.FC = () => {
                 <div className="flex"><span className="font-bold w-24">Name:</span> <span>{p?.name || '---'}</span></div>
                 <div className="flex"><span className="font-bold w-24">Date of Visit:</span> <span>{formatDate(printingVisit.date)}</span></div>
                 <div className="flex"><span className="font-bold w-24">Symptoms:</span> <span>{printingVisit.symptoms || '---'}</span></div>
-                <div className="flex flex-col"><span className="font-bold mb-1">Medication:</span> <span className="pl-4 italic">{medNames || '---'}</span></div>
+                <div className="flex flex-col"><span className="font-bold mb-1">Medication:</span> <span className="pl-4 italic">{medDetails || '---'}</span></div>
               </div>
 
               <div className="pt-6 mt-6 border-t border-black text-center italic">
