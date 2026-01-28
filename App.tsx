@@ -738,7 +738,7 @@ const App: React.FC = () => {
       .filter(v => {
         if (!s) return true;
         const medNames = v.prescribedMeds.map(pm => {
-          const med = medications.find(m => m.id === pm.medicationId);
+          const med = medications.find(med => med.id === pm.medicationId);
           return `${med?.brandName || ''} ${med?.scientificName || ''}`;
         }).join(' ');
         return (
@@ -1248,7 +1248,13 @@ const App: React.FC = () => {
                     <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between group">
                       <div>
                         <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
-                        {(item.diagnosis || item.scientificName) && <p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}</p>}
+                        {(item.diagnosis || item.scientificName) && (
+                          <p className="text-[10px] text-slate-400 italic mt-1 truncate">
+                            {item.diagnosis || item.scientificName}
+                            {settingsTab === 'meds' && (item as Medication).category && ` • ${(item as Medication).category}`}
+                            {settingsTab === 'meds' && (item as Medication).type && ` • ${(item as Medication).type}`}
+                          </p>
+                        )}
                         
                         {/* Display brands below Scientific Name */}
                         {settingsTab === 'scientific' && brands.length > 0 && (
