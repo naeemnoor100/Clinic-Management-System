@@ -574,6 +574,7 @@ const App: React.FC = () => {
     setFormDiagnosis('');
     setFormSelectedPatientId(null);
     setPatientFormSearch('');
+    setShowPatientResults(false);
     triggerPrint(newVisit);
   };
 
@@ -1124,9 +1125,15 @@ const App: React.FC = () => {
                <div className="lg:col-span-2 space-y-6">
                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                    <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Pharmacy</h1>
-                   <div className="relative w-full sm:w-64">
-                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                     <input type="text" placeholder="Search medicines..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold text-sm" />
+                   <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
+                    <div className="flex gap-1 shrink-0">
+                       <button onClick={exportMedsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button>
+                       <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label>
+                    </div>
+                    <div className="relative flex-grow sm:w-64">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                      <input type="text" placeholder="Search medicines..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold text-sm" />
+                    </div>
                    </div>
                  </div>
                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -1197,7 +1204,15 @@ const App: React.FC = () => {
            {view === 'settings' && (
              <div className="space-y-6 md:space-y-8 animate-in fade-in">
                 <div className="flex flex-col gap-4">
-                  <h1 className="text-2xl font-black text-slate-800">Settings</h1>
+                  <div className="flex justify-between items-center">
+                    <h1 className="text-2xl font-black text-slate-800">Settings</h1>
+                    {settingsTab === 'meds' && (
+                      <div className="flex gap-1">
+                        <button onClick={exportMedsCsv} className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button>
+                        <label className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">
                     {[
                       { id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> }, 
