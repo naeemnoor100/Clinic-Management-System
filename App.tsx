@@ -724,10 +724,20 @@ const App: React.FC = () => {
     return `Patient Profile\nName: ${p.name}\nCode: ${p.patientCode}\nPhone: ${p.phone}\nAddress: ${p.address}\nAllergies: ${p.allergies || 'None'}\nChronic: ${p.chronicConditions || 'None'}`;
   };
 
-  const filteredAllergyScientificNames = useMemo(() => {
+  const filteredAllergyOptions = useMemo(() => {
     const s = allergySearchTerm.toLowerCase();
-    return scientificNames.filter(sn => sn.label.toLowerCase().includes(s));
-  }, [scientificNames, allergySearchTerm]);
+    
+    // Get unique brand names from medications
+    const uniqueBrandNames = Array.from(new Set(medications.map(m => m.brandName)));
+    
+    const options = [
+      ...scientificNames.map(sn => ({ id: sn.id, label: sn.label, isBrand: false })),
+      ...uniqueBrandNames.map(bn => ({ id: `brand_${bn}`, label: bn, isBrand: true }))
+    ];
+
+    if (!s) return options.slice(0, 50); // Show a subset initially
+    return options.filter(opt => opt.label.toLowerCase().includes(s));
+  }, [scientificNames, medications, allergySearchTerm]);
 
   // Search logic for visit history within patient detail view
   const filteredHistory = useMemo(() => {
@@ -738,7 +748,7 @@ const App: React.FC = () => {
       .filter(v => {
         if (!s) return true;
         const medNames = v.prescribedMeds.map(pm => {
-          const med = medications.find(m => m.id === pm.medicationId);
+          const med = medications.find(med => med.id === pm.medicationId);
           return `${med?.brandName || ''} ${med?.scientificName || ''}`;
         }).join(' ');
         return (
@@ -816,7 +826,7 @@ const App: React.FC = () => {
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
                 <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                  <div onClick={() => setView('patients')} className="bg-blue-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                  <div onClick={() => setView('patients')} className="bg-blue-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                     <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
@@ -869,9 +879,12 @@ const App: React.FC = () => {
                          <div className="flex-grow min-w-0">
                            <div className="flex items-center gap-2">
                              <h3 className="font-black text-slate-800 truncate text-base">{p.name}</h3>
-                             {(p.allergies || p.chronicConditions) && <AlertCircle size={14} className="text-red-500 shrink-0 animate-pulse" />}
                            </div>
-                           <p className="text-[10px] text-slate-400 font-bold uppercase truncate">{p.patientCode} • {p.age}Y</p>
+                           <p className="text-[11px] text-blue-600 font-bold leading-tight">{p.phone}</p>
+                           {p.allergies && (
+                             <p className="text-[10px] text-rose-500 font-bold truncate leading-tight mt-0.5">Allergy: {p.allergies}</p>
+                           )}
+                           <p className="text-[9px] text-slate-400 font-bold uppercase truncate mt-1">{p.patientCode} • {p.age}Y</p>
                          </div>
                        </div>
                        
@@ -1477,33 +1490,36 @@ const App: React.FC = () => {
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-rose-400 uppercase ml-1 flex items-center justify-between">
                       Patient Allergies 
-                      <span className="text-[8px] opacity-60">Selection of Scientific Names</span>
+                      <span className="text-[8px] opacity-60">Scientific Names & Medicine Brands</span>
                     </label>
                     <div className="relative">
                       <Search className="absolute left-3 top-3 text-slate-300" size={12} />
                       <input 
                         type="text" 
-                        placeholder="Search Allergies..." 
+                        placeholder="Search Allergies (e.g. Panadol, Aspirin...)" 
                         value={allergySearchTerm}
                         onChange={(e) => setAllergySearchTerm(e.target.value)}
                         className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-100 bg-slate-50 text-[10px] font-bold focus:border-rose-300 outline-none"
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-3 border-2 border-rose-100/30 rounded-2xl bg-rose-50/10 shadow-inner">
-                      {filteredAllergyScientificNames.map(sn => (
-                        <label key={sn.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 cursor-pointer hover:border-rose-300 has-[:checked]:bg-rose-50 has-[:checked]:border-rose-500 group transition-all">
+                      {filteredAllergyOptions.map(opt => (
+                        <label key={opt.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 cursor-pointer hover:border-rose-300 has-[:checked]:bg-rose-50 has-[:checked]:border-rose-500 group transition-all">
                           <input 
                             type="checkbox" 
                             name="allergyScientificNames" 
-                            value={sn.label} 
-                            defaultChecked={editingPatient?.allergies?.split(', ').includes(sn.label)} 
+                            value={opt.label} 
+                            defaultChecked={editingPatient?.allergies?.split(', ').includes(opt.label)} 
                             className="hidden" 
                           />
-                          <span className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{sn.label}</span>
+                          <div className="flex-grow min-w-0">
+                            <p className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{opt.label}</p>
+                            {opt.isBrand && <span className="text-[7px] uppercase font-bold text-slate-300 group-has-[:checked]:text-rose-400">Medicine</span>}
+                          </div>
                         </label>
                       ))}
-                      {filteredAllergyScientificNames.length === 0 && (
-                        <p className="col-span-2 text-center text-[9px] text-slate-300 py-4 uppercase font-bold">No scientific names found</p>
+                      {filteredAllergyOptions.length === 0 && (
+                        <p className="col-span-2 text-center text-[9px] text-slate-300 py-4 uppercase font-bold">No results found</p>
                       )}
                     </div>
                   </div>
