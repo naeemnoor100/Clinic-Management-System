@@ -264,6 +264,8 @@ const App: React.FC = () => {
 
   // New state for Allergy Search in Patient Form
   const [allergySearchTerm, setAllergySearchTerm] = useState('');
+  const [selectedAllergies, setSelectedAllergies] = useState<string[]>([]);
+  const [showAllergyDropdown, setShowAllergyDropdown] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -288,6 +290,8 @@ const App: React.FC = () => {
         setPatientFormSearch('');
         setShowPatientResults(false);
         setAllergySearchTerm('');
+        setSelectedAllergies([]);
+        setShowAllergyDropdown(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -872,6 +876,15 @@ const App: React.FC = () => {
     return { topPrescribed, revenueByDay, ages, genders };
   }, [visits, pharmacySales, patients, medications]);
 
+  // Allergy Selection Handler
+  const toggleAllergy = (label: string) => {
+    setSelectedAllergies(prev => 
+      prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
+    );
+    setAllergySearchTerm('');
+    setShowAllergyDropdown(false);
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -909,29 +922,30 @@ const App: React.FC = () => {
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
                 <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                  <div onClick={() => setView('patients')} className="bg-blue-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
+                  {/* Updated Dashboard Card Colors */}
+                  <div onClick={() => setView('patients')} className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
-                  <div onClick={() => setView('billing')} className="bg-emerald-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-emerald-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Total Revenue</p>
+                  <div onClick={() => setView('billing')} className="bg-gradient-to-br from-emerald-500 to-teal-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-emerald-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Revenue</p>
                     <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.collected.toLocaleString()}<TrendingUp size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
-                  <div className="bg-amber-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-amber-100 group">
-                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Pending Payments</p>
+                  <div className="bg-gradient-to-br from-orange-400 to-amber-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-amber-100 group">
+                    <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Pending Payments</p>
                     <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.pending.toLocaleString()}<Wallet size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
-                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-rose-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                    <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Low Stock Medicines</p>
+                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-gradient-to-br from-rose-500 to-pink-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                    <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Low Stock Medicines</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
                   <div onClick={() => setView('visits')} className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                      <div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div>
                      <Clock size={40} className="text-blue-200 group-hover:text-blue-500 transition-colors" />
                   </div>
-                  <div onClick={() => setView('analytics')} className="bg-indigo-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                     <div><p className="text-indigo-400 text-[10px] font-bold uppercase">Performance</p><p className="text-xl md:text-2xl font-black text-indigo-900">View Analytics</p></div>
-                     <BarChart3 size={40} className="text-indigo-200 group-hover:text-indigo-500 transition-colors" />
+                  <div onClick={() => setView('analytics')} className="bg-gradient-to-br from-violet-500 to-purple-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-purple-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                     <div><p className="text-purple-100 text-[10px] font-bold uppercase">Performance</p><p className="text-xl md:text-2xl font-black text-white">View Analytics</p></div>
+                     <BarChart3 size={40} className="text-white opacity-30 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
               </div>
@@ -947,7 +961,6 @@ const App: React.FC = () => {
                </div>
 
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                 {/* Revenue Trend Chart (Simple CSS Bar Chart) */}
                  <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                    <div className="flex items-center justify-between">
                      <h3 className="font-black text-slate-800 flex items-center gap-2"><TrendingUp className="text-emerald-500" size={20}/> Revenue Trend (7 Days)</h3>
@@ -955,7 +968,6 @@ const App: React.FC = () => {
                    </div>
                    <div className="flex items-end justify-between h-48 gap-2 px-2">
                      {analyticsData.revenueByDay.map((day, idx) => {
-                       // Fix: Explicit numeric casting to avoid arithmetic errors
                        const maxVal = Math.max(...analyticsData.revenueByDay.map(d => Number(d.total))) || 1;
                        const height = (Number(day.total) / maxVal) * 100;
                        return (
@@ -979,12 +991,10 @@ const App: React.FC = () => {
                    </div>
                  </div>
 
-                 {/* Top Prescribed Meds */}
                  <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                    <h3 className="font-black text-slate-800 flex items-center gap-2"><Pill className="text-indigo-500" size={20}/> Top Prescribed Medications</h3>
                    <div className="space-y-4">
                      {analyticsData.topPrescribed.map(([name, count], idx) => {
-                       // Fix: Improved safety for finding max value and numeric casting
                        const maxCount = analyticsData.topPrescribed.length > 0 ? Number(analyticsData.topPrescribed[0][1]) : 1;
                        const width = (Number(count) / maxCount) * 100;
                        return (
@@ -1008,13 +1018,11 @@ const App: React.FC = () => {
                    </div>
                  </div>
 
-                 {/* Demographics - Age Groups */}
                  <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                    <h3 className="font-black text-slate-800 flex items-center gap-2"><Users className="text-blue-500" size={20}/> Patient Age Distribution</h3>
                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                      {Object.entries(analyticsData.ages).map(([group, count]) => {
                        const total = patients.length || 1;
-                       // Fix: Cast count to number
                        const percent = Math.round((Number(count) / total) * 100);
                        return (
                          <div key={group} className="p-4 bg-slate-50 rounded-2xl text-center space-y-1">
@@ -1027,14 +1035,12 @@ const App: React.FC = () => {
                    </div>
                  </div>
 
-                 {/* Demographics - Gender Distribution */}
                  <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
                    <h3 className="font-black text-slate-800 flex items-center gap-2"><PieChart className="text-rose-500" size={20}/> Gender Demographics</h3>
                    <div className="flex items-center gap-6">
                       <div className="flex-1 space-y-4">
                         {Object.entries(analyticsData.genders).map(([gender, count]) => {
                           const total = patients.length || 1;
-                          // Fix: Cast count to number
                           const width = (Number(count) / total) * 100;
                           return (
                             <div key={gender} className="space-y-1">
@@ -1063,7 +1069,7 @@ const App: React.FC = () => {
                </div>
              </div>
            )}
-
+           {/* Rest of the component remains the same */}
            {view === 'patients' && (
              <div className="space-y-6 animate-in fade-in">
                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -1077,7 +1083,7 @@ const App: React.FC = () => {
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input type="text" placeholder="Search..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-sm" />
                     </div>
-                    <button onClick={() => { setEditingPatient(null); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
+                    <button onClick={() => { setEditingPatient(null); setSelectedAllergies([]); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
                  </div>
                </div>
                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -1116,7 +1122,7 @@ const App: React.FC = () => {
 
                      <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
                        <div className="flex gap-1">
-                          <button onClick={(e) => { e.stopPropagation(); setEditingPatient(p); setShowPatientForm(true); }} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={16} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); setEditingPatient(p); setSelectedAllergies(p.allergies ? p.allergies.split(', ').filter(Boolean) : []); setShowPatientForm(true); }} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={16} /></button>
                           <button onClick={(e) => { e.stopPropagation(); handleDeletePatient(p.id); }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
                        </div>
                        {lastVisit && (
@@ -1150,14 +1156,13 @@ const App: React.FC = () => {
                              <h2 className="text-2xl md:text-4xl font-black text-slate-800 leading-tight">{p.name}</h2>
                              <div className="flex gap-1 no-print shrink-0">
                                <button onClick={() => setQrPatient(p)} className="p-2.5 bg-indigo-50 text-indigo-400 hover:text-indigo-600 rounded-xl" title="Patient Profile QR"><QrCode size={18}/></button>
-                               <button onClick={() => { setEditingPatient(p); setShowPatientForm(true); }} className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl" title="Edit Info"><Edit2 size={18}/></button>
+                               <button onClick={() => { setEditingPatient(p); setSelectedAllergies(p.allergies ? p.allergies.split(', ').filter(Boolean) : []); setShowPatientForm(true); }} className="p-2.5 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-xl" title="Edit Info"><Edit2 size={18}/></button>
                                <button onClick={() => handleDeletePatient(p.id)} className="p-2.5 bg-red-50 text-red-400 hover:text-red-600 rounded-xl" title="Delete"><Trash2 size={18}/></button>
                              </div>
                            </div>
                            <p className="text-slate-400 font-bold mt-2 uppercase text-[10px] md:text-xs">{p.patientCode} • {p.age}Y • {p.gender}</p>
                            <p className="text-slate-600 mt-4 font-medium text-sm">{p.phone} • {p.address}</p>
 
-                           {/* Medical Alerts Section */}
                            {(p.allergies || p.chronicConditions) && (
                              <div className="mt-6 md:mt-8 flex flex-col sm:flex-row gap-3 md:gap-4">
                                 {p.allergies && (
@@ -1389,7 +1394,6 @@ const App: React.FC = () => {
                  </div>
                </div>
                
-               {/* Cart Section - Adjusts for mobile flow */}
                <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] shadow-xl border-4 border-white h-fit lg:sticky lg:top-12 space-y-6 md:space-y-8">
                   <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><ShoppingCart className="text-blue-600" size={24} /> Checkout</h2>
                   <div className="space-y-3 max-h-60 md:max-h-96 overflow-y-auto pr-1 custom-scrollbar">
@@ -1494,7 +1498,6 @@ const App: React.FC = () => {
                           </p>
                         )}
                         
-                        {/* Display brands below Scientific Name or Company Name */}
                         {(settingsTab === 'scientific' || settingsTab === 'companies') && brands.length > 0 && (
                           <div className="mt-3">
                             <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">
@@ -1670,19 +1673,19 @@ const App: React.FC = () => {
            <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
              <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0">
                <h2 className="text-xl font-black tracking-tight">{editingPatient ? 'Update Profile' : 'Register Patient'}</h2>
-               <button onClick={() => { setShowPatientForm(false); setEditingPatient(null); setAllergySearchTerm(''); }} className="text-3xl">&times;</button>
+               <button onClick={() => { setShowPatientForm(false); setEditingPatient(null); setAllergySearchTerm(''); setSelectedAllergies([]); }} className="text-3xl">&times;</button>
              </div>
              <form onSubmit={(e) => { 
                e.preventDefault(); 
                const f = new FormData(e.currentTarget); 
-               const selectedAllergies = (f.getAll('allergyScientificNames') as string[]).join(', ');
+               const allergiesStr = selectedAllergies.join(', ');
                const d = { 
                  name: f.get('name') as string, 
                  age: parseInt(f.get('age') as string), 
                  gender: f.get('gender') as any, 
                  phone: f.get('phone') as string, 
                  address: f.get('address') as string, 
-                 allergies: selectedAllergies, 
+                 allergies: allergiesStr, 
                  chronicConditions: f.get('chronicConditions') as string 
                }; 
                if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); 
@@ -1693,6 +1696,7 @@ const App: React.FC = () => {
                setShowPatientForm(false); 
                setEditingPatient(null); 
                setAllergySearchTerm('');
+               setSelectedAllergies([]);
              }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Full Name</label><input required name="name" defaultValue={editingPatient?.name} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
                 <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Age</label><input required type="number" name="age" defaultValue={editingPatient?.age} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Gender</label><select name="gender" defaultValue={editingPatient?.gender} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm"><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></div></div>
@@ -1701,47 +1705,97 @@ const App: React.FC = () => {
                 
                 <div className="border-t pt-4 space-y-4">
                   <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
+                  
+                  {/* Improved Allergy Selection System */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-rose-400 uppercase ml-1 flex items-center justify-between">
                       Patient Allergies 
-                      <span className="text-[8px] opacity-60">Scientific Names & Medicine Brands</span>
+                      <span className="text-[8px] opacity-60">Search Brands or Scientific Names</span>
                     </label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-3 text-slate-300" size={12} />
-                      <input 
-                        type="text" 
-                        placeholder="Search Allergies (e.g. Panadol, Aspirin...)" 
-                        value={allergySearchTerm}
-                        onChange={(e) => setAllergySearchTerm(e.target.value)}
-                        className="w-full pl-8 pr-4 py-2 rounded-xl border border-slate-100 bg-slate-50 text-[10px] font-bold focus:border-rose-300 outline-none"
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-3 border-2 border-rose-100/30 rounded-2xl bg-rose-50/10 shadow-inner">
-                      {filteredAllergyOptions.map(opt => (
-                        <label key={opt.id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-100 cursor-pointer hover:border-rose-300 has-[:checked]:bg-rose-50 has-[:checked]:border-rose-500 group transition-all">
-                          <input 
-                            type="checkbox" 
-                            name="allergyScientificNames" 
-                            value={opt.label} 
-                            defaultChecked={editingPatient?.allergies?.split(', ').includes(opt.label)} 
-                            className="hidden" 
-                          />
-                          <div className="flex-grow min-w-0">
-                            <p className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{opt.display}</p>
-                            <p className="text-[7px] uppercase font-bold text-slate-300 group-has-[:checked]:text-rose-400 truncate">
-                                {opt.isBrand ? `Brand • ${opt.sub}` : 'Scientific Name'}
-                            </p>
-                          </div>
-                        </label>
+                    
+                    {/* Selected Allergy Tags */}
+                    <div className="flex flex-wrap gap-2 mb-2 min-h-[1.5rem]">
+                      {selectedAllergies.map((allergy, idx) => (
+                        <div key={idx} className="flex items-center gap-2 bg-rose-50 text-rose-700 px-3 py-1.5 rounded-xl border border-rose-100 text-[10px] font-black shadow-sm animate-in zoom-in">
+                          {allergy}
+                          <button type="button" onClick={() => toggleAllergy(allergy)} className="hover:text-rose-900 transition-colors">
+                            <X size={12} />
+                          </button>
+                        </div>
                       ))}
-                      {filteredAllergyOptions.length === 0 && (
-                        <p className="col-span-2 text-center text-[9px] text-slate-300 py-4 uppercase font-bold">No results found</p>
+                      {selectedAllergies.length === 0 && (
+                        <p className="text-[10px] text-slate-300 italic py-1">No allergies selected</p>
+                      )}
+                    </div>
+
+                    {/* Allergy Search Input & Dropdown */}
+                    <div className="relative">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <input 
+                          type="text" 
+                          placeholder="Type to find (e.g. Panadol, Aspirin...)" 
+                          value={allergySearchTerm}
+                          onFocus={() => setShowAllergyDropdown(true)}
+                          onChange={(e) => setAllergySearchTerm(e.target.value)}
+                          className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-[11px] font-bold focus:border-rose-300 outline-none transition-all"
+                        />
+                        {allergySearchTerm && (
+                          <button 
+                            type="button" 
+                            onClick={() => setAllergySearchTerm('')} 
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+                      
+                      {/* Dropdown Results */}
+                      {showAllergyDropdown && allergySearchTerm.trim() && (
+                        <div className="absolute z-[600] left-0 right-0 mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-56 overflow-y-auto divide-y divide-slate-50 overflow-hidden animate-in slide-in-from-top-2">
+                          {filteredAllergyOptions
+                            .filter(opt => !selectedAllergies.includes(opt.label))
+                            .map((opt, idx) => (
+                            <button 
+                              key={idx} 
+                              type="button" 
+                              onClick={() => toggleAllergy(opt.label)} 
+                              className="w-full text-left px-5 py-3 hover:bg-rose-50 flex flex-col group transition-colors"
+                            >
+                              <div className="flex justify-between items-center">
+                                <span className="text-[11px] font-black text-slate-700 group-hover:text-rose-700">{opt.display}</span>
+                                <Plus size={12} className="text-slate-200 group-hover:text-rose-400" />
+                              </div>
+                              <span className="text-[8px] uppercase font-bold text-slate-400 group-hover:text-rose-300">
+                                  {opt.isBrand ? `Medicine Brand • ${opt.sub}` : 'Scientific Name'}
+                              </span>
+                            </button>
+                          ))}
+                          {filteredAllergyOptions.filter(opt => !selectedAllergies.includes(opt.label)).length === 0 && (
+                            <div className="p-5 text-center flex flex-col items-center gap-2">
+                              <Search size={20} className="text-slate-200" />
+                              <p className="text-[10px] text-slate-300 uppercase font-black">No matching records found</p>
+                              <button 
+                                type="button" 
+                                onClick={() => toggleAllergy(allergySearchTerm)}
+                                className="mt-1 text-[9px] text-blue-500 font-black underline"
+                              >
+                                Add "{allergySearchTerm}" anyway?
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
-                  <div className="space-y-1"><label className="text-[10px] font-black text-amber-500 uppercase ml-1">Chronic Conditions</label><input name="chronicConditions" defaultValue={editingPatient?.chronicConditions} placeholder="None" className="w-full p-4 rounded-xl border-2 border-amber-100 bg-amber-50/20 font-black text-amber-700 text-sm outline-none" /></div>
+
+                  <div className="space-y-1 pt-2">
+                    <label className="text-[10px] font-black text-amber-500 uppercase ml-1">Chronic Conditions</label>
+                    <input name="chronicConditions" defaultValue={editingPatient?.chronicConditions} placeholder="None" className="w-full p-4 rounded-xl border-2 border-amber-100 bg-amber-50/20 font-black text-amber-700 text-sm outline-none" />
+                  </div>
                 </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Profile</button>
+                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm mt-2 transition-all active:scale-95">Save Profile</button>
              </form>
            </div>
         </div>
@@ -1815,8 +1869,6 @@ const App: React.FC = () => {
                         const selectedMed = medications.find(m => m.id === pm.medicationId); 
                         const isSearching = activeMedSearchIndex === idx; 
                         const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
-                        
-                        // Allergy check for this specific medicine row
                         const isAllergic = pm.medicationId ? checkMedAllergy(pm.medicationId) : false;
 
                         return (
@@ -1847,8 +1899,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Settings Modals */}
-      {/* (Simplified modal logic maintained as per previous file) */}
       {[
         { show: showSymptomForm, set: setShowSymptomForm, editing: editingSymptom, setEditing: setEditingSymptom, title: 'Symptom', color: 'emerald', list: symptoms, setList: setSymptoms },
         { show: showScientificForm, set: setShowScientificForm, editing: editingScientificName, setEditing: setEditingScientificName, title: 'Scientific Name', color: 'indigo', list: scientificNames, setList: setScientificNames },
@@ -1942,7 +1992,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 80mm Thermal Receipt Print View */}
       <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
         {printingVisit && (() => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
