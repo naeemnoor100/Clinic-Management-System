@@ -1,3 +1,4 @@
+
 export interface Medication {
   id: string;
   brandName: string;
@@ -122,4 +123,4 @@ export interface QueueItem {
   checkInTime: string;
 }
 
-export type View = 'dashboard' | 'patients' | 'visits' | 'patient-detail' | 'settings' | 'queue' | 'billing' | 'pharmacy';
+export type View = 'dashboard' | 'patients' | 'visits' | 'patient-detail' | 'settings' | 'queue' | 'billing' | 'pharmacy' | 'analytics';

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -44,7 +45,10 @@ import {
   AlertCircle,
   ShieldAlert,
   Menu,
-  User
+  User,
+  BarChart3,
+  PieChart,
+  TrendingDown
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -727,16 +731,40 @@ const App: React.FC = () => {
   const filteredAllergyOptions = useMemo(() => {
     const s = allergySearchTerm.toLowerCase();
     
-    // Get unique brand names from medications
-    const uniqueBrandNames = Array.from(new Set(medications.map(m => m.brandName)));
-    
-    const options = [
-      ...scientificNames.map(sn => ({ id: sn.id, label: sn.label, isBrand: false })),
-      ...uniqueBrandNames.map(bn => ({ id: `brand_${bn}`, label: bn, isBrand: true }))
-    ];
+    // Get unique brand names and their associated scientific names
+    const brandMap = new Map();
+    medications.forEach(m => {
+      if (!brandMap.has(m.brandName)) {
+        brandMap.set(m.brandName, m.scientificName);
+      }
+    });
 
-    if (!s) return options.slice(0, 50); // Show a subset initially
-    return options.filter(opt => opt.label.toLowerCase().includes(s));
+    const scientificOptions = scientificNames.map(sn => ({ 
+      id: sn.id, 
+      label: sn.label, 
+      display: sn.label,
+      sub: 'Scientific',
+      isBrand: false 
+    }));
+    
+    const brandOptions = Array.from(brandMap.entries()).map(([brand, sci], idx) => ({ 
+      id: `brand_${idx}`, 
+      label: brand, 
+      display: brand, 
+      sub: sci,
+      isBrand: true 
+    }));
+    
+    const options = [...scientificOptions, ...brandOptions];
+
+    const result = s 
+      ? options.filter(opt => 
+          opt.label.toLowerCase().includes(s) || 
+          opt.sub.toLowerCase().includes(s)
+        )
+      : options;
+
+    return result.sort((a, b) => a.label.localeCompare(b.label)).slice(0, 100);
   }, [scientificNames, medications, allergySearchTerm]);
 
   // Search logic for visit history within patient detail view
@@ -768,7 +796,7 @@ const App: React.FC = () => {
     const med = medications.find(m => m.id === medId);
     if (!med) return false;
 
-    // Split patient allergies (which are scientific names from registration form)
+    // Split patient allergies
     const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
     const medSci = med.scientificName.toLowerCase().trim();
     const medBrand = med.brandName.toLowerCase().trim();
@@ -789,6 +817,60 @@ const App: React.FC = () => {
       .filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase())
       .map(m => m.brandName);
   };
+
+  // Analytics Helpers
+  const analyticsData = useMemo(() => {
+    // 1. Most Prescribed Medications (from Visits)
+    const medFrequency: Record<string, number> = {};
+    visits.forEach(v => {
+      v.prescribedMeds.forEach(pm => {
+        const med = medications.find(m => m.id === pm.medicationId);
+        if (med) {
+          medFrequency[med.brandName] = (medFrequency[med.brandName] || 0) + 1;
+        }
+      });
+    });
+    // Explicitly cast for arithmetic sort
+    const topPrescribed = Object.entries(medFrequency)
+      .sort((a, b) => (b[1] as number) - (a[1] as number))
+      .slice(0, 5);
+
+    // 2. Revenue Trends (last 7 days)
+    const last7Days = Array.from({ length: 7 }, (_, i) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - i));
+      return d.toISOString().split('T')[0];
+    });
+
+    const revenueByDay = last7Days.map(date => {
+      const vTotal = visits
+        .filter(v => v.date === date && v.paymentStatus === 'Paid')
+        .reduce((sum, v) => sum + (v.feeAmount || 0), 0);
+      const pTotal = pharmacySales
+        .filter(s => s.date === date)
+        .reduce((sum, s) => sum + s.totalAmount, 0);
+      return { date, total: vTotal + pTotal };
+    });
+
+    // 3. Demographics
+    const ages: Record<string, number> = { 
+      'Children (0-17)': 0, 
+      'Adults (18-54)': 0, 
+      'Seniors (55+)': 0 
+    };
+    patients.forEach(p => {
+      if (p.age < 18) ages['Children (0-17)']++;
+      else if (p.age < 55) ages['Adults (18-54)']++;
+      else ages['Seniors (55+)']++;
+    });
+
+    const genders: Record<string, number> = { Male: 0, Female: 0, Other: 0 };
+    patients.forEach(p => {
+      if (genders[p.gender] !== undefined) genders[p.gender]++;
+    });
+
+    return { topPrescribed, revenueByDay, ages, genders };
+  }, [visits, pharmacySales, patients, medications]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
@@ -815,6 +897,7 @@ const App: React.FC = () => {
           <SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} />
           <SidebarItem icon={<ShoppingCart size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} />
           <SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} />
+          <SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} />
           <SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
         </nav>
       </aside>
@@ -838,7 +921,7 @@ const App: React.FC = () => {
                     <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Pending Payments</p>
                     <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.pending.toLocaleString()}<Wallet size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
-                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-rose-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-rose-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                     <p className="opacity-70 text-[10px] font-bold uppercase tracking-widest">Low Stock Medicines</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
@@ -846,8 +929,139 @@ const App: React.FC = () => {
                      <div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div>
                      <Clock size={40} className="text-blue-200 group-hover:text-blue-500 transition-colors" />
                   </div>
+                  <div onClick={() => setView('analytics')} className="bg-indigo-50 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
+                     <div><p className="text-indigo-400 text-[10px] font-bold uppercase">Performance</p><p className="text-xl md:text-2xl font-black text-indigo-900">View Analytics</p></div>
+                     <BarChart3 size={40} className="text-indigo-200 group-hover:text-indigo-500 transition-colors" />
+                  </div>
                 </div>
               </div>
+           )}
+
+           {view === 'analytics' && (
+             <div className="space-y-8 animate-in fade-in">
+               <div className="flex justify-between items-center">
+                 <h1 className="text-2xl md:text-3xl font-black text-slate-800">Clinic Analytics</h1>
+                 <button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs">
+                    <ArrowRight className="rotate-180" size={18} /> Dashboard
+                 </button>
+               </div>
+
+               <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                 {/* Revenue Trend Chart (Simple CSS Bar Chart) */}
+                 <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                   <div className="flex items-center justify-between">
+                     <h3 className="font-black text-slate-800 flex items-center gap-2"><TrendingUp className="text-emerald-500" size={20}/> Revenue Trend (7 Days)</h3>
+                     <span className="text-[10px] font-black text-slate-400 uppercase">Paid Total</span>
+                   </div>
+                   <div className="flex items-end justify-between h-48 gap-2 px-2">
+                     {analyticsData.revenueByDay.map((day, idx) => {
+                       // Fix: Explicit numeric casting to avoid arithmetic errors
+                       const maxVal = Math.max(...analyticsData.revenueByDay.map(d => Number(d.total))) || 1;
+                       const height = (Number(day.total) / maxVal) * 100;
+                       return (
+                         <div key={idx} className="flex-1 flex flex-col items-center gap-2 group">
+                            <div className="w-full relative">
+                              <div 
+                                style={{ height: `${Math.max(height, 5)}%` }} 
+                                className="w-full bg-blue-500 rounded-t-lg group-hover:bg-blue-600 transition-all relative"
+                              >
+                                {day.total > 0 && (
+                                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[9px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                    {CURRENCY} {day.total}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase">{day.date.split('-').slice(1).join('/')}</span>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 </div>
+
+                 {/* Top Prescribed Meds */}
+                 <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                   <h3 className="font-black text-slate-800 flex items-center gap-2"><Pill className="text-indigo-500" size={20}/> Top Prescribed Medications</h3>
+                   <div className="space-y-4">
+                     {analyticsData.topPrescribed.map(([name, count], idx) => {
+                       // Fix: Improved safety for finding max value and numeric casting
+                       const maxCount = analyticsData.topPrescribed.length > 0 ? Number(analyticsData.topPrescribed[0][1]) : 1;
+                       const width = (Number(count) / maxCount) * 100;
+                       return (
+                         <div key={name} className="space-y-1">
+                           <div className="flex justify-between text-xs font-black text-slate-600">
+                             <span>{name}</span>
+                             <span>{count} times</span>
+                           </div>
+                           <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                             <div 
+                                style={{ width: `${width}%` }} 
+                                className={`h-full rounded-full transition-all duration-1000 bg-indigo-500`}
+                             />
+                           </div>
+                         </div>
+                       );
+                     })}
+                     {analyticsData.topPrescribed.length === 0 && (
+                       <p className="text-center py-10 text-slate-300 font-bold uppercase text-xs">No records found</p>
+                     )}
+                   </div>
+                 </div>
+
+                 {/* Demographics - Age Groups */}
+                 <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                   <h3 className="font-black text-slate-800 flex items-center gap-2"><Users className="text-blue-500" size={20}/> Patient Age Distribution</h3>
+                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                     {Object.entries(analyticsData.ages).map(([group, count]) => {
+                       const total = patients.length || 1;
+                       // Fix: Cast count to number
+                       const percent = Math.round((Number(count) / total) * 100);
+                       return (
+                         <div key={group} className="p-4 bg-slate-50 rounded-2xl text-center space-y-1">
+                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{group}</p>
+                           <p className="text-2xl font-black text-slate-800">{count}</p>
+                           <div className="text-[9px] font-bold text-blue-600">{percent}% of total</div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 </div>
+
+                 {/* Demographics - Gender Distribution */}
+                 <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                   <h3 className="font-black text-slate-800 flex items-center gap-2"><PieChart className="text-rose-500" size={20}/> Gender Demographics</h3>
+                   <div className="flex items-center gap-6">
+                      <div className="flex-1 space-y-4">
+                        {Object.entries(analyticsData.genders).map(([gender, count]) => {
+                          const total = patients.length || 1;
+                          // Fix: Cast count to number
+                          const width = (Number(count) / total) * 100;
+                          return (
+                            <div key={gender} className="space-y-1">
+                               <div className="flex justify-between text-[10px] font-black uppercase text-slate-500">
+                                 <span>{gender}</span>
+                                 <span>{count}</span>
+                               </div>
+                               <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                  <div 
+                                    style={{ width: `${width}%` }} 
+                                    className={`h-full rounded-full bg-${gender === 'Male' ? 'blue' : gender === 'Female' ? 'rose' : 'slate'}-500`}
+                                  />
+                               </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div className="hidden sm:block p-8 border-4 border-slate-50 rounded-full">
+                         <div className="text-center">
+                            <p className="text-3xl font-black text-slate-800">{patients.length}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase">Total Patients</p>
+                         </div>
+                      </div>
+                   </div>
+                 </div>
+               </div>
+             </div>
            )}
 
            {view === 'patients' && (
@@ -1343,8 +1557,8 @@ const App: React.FC = () => {
         <button onClick={() => setView('pharmacy')} className={`flex flex-col items-center gap-1 transition-all ${view === 'pharmacy' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
           <Pill size={20} /><span className="text-[9px] font-black uppercase">Med</span>
         </button>
-        <button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1 transition-all ${view === 'settings' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
-          <Settings size={20} /><span className="text-[9px] font-black uppercase">Tools</span>
+        <button onClick={() => setView('analytics')} className={`flex flex-col items-center gap-1 transition-all ${view === 'analytics' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}>
+          <BarChart3 size={20} /><span className="text-[9px] font-black uppercase">Stats</span>
         </button>
       </nav>
 
@@ -1513,8 +1727,10 @@ const App: React.FC = () => {
                             className="hidden" 
                           />
                           <div className="flex-grow min-w-0">
-                            <p className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{opt.label}</p>
-                            {opt.isBrand && <span className="text-[7px] uppercase font-bold text-slate-300 group-has-[:checked]:text-rose-400">Medicine</span>}
+                            <p className="text-[9px] font-black text-slate-500 group-has-[:checked]:text-rose-700 truncate">{opt.display}</p>
+                            <p className="text-[7px] uppercase font-bold text-slate-300 group-has-[:checked]:text-rose-400 truncate">
+                                {opt.isBrand ? `Brand • ${opt.sub}` : 'Scientific Name'}
+                            </p>
                           </div>
                         </label>
                       ))}
@@ -1568,7 +1784,7 @@ const App: React.FC = () => {
                     {selectedPatientInForm.chronicConditions && (
                       <div className="flex items-start gap-3 flex-1 border-rose-100 border-t sm:border-t-0 sm:border-l sm:pl-6 pt-3 sm:pt-0">
                         <Activity className="text-amber-600 shrink-0" size={20} />
-                        <div><p className="text-[8px] md:text-[9px] font-black uppercase text-amber-500">Chronic Alert</p><p className="text-xs font-black text-amber-800">{selectedPatientInForm.chronicConditions}</p></div>
+                        <div><p className="text-[8px] md:text-[9px] font-black uppercase text-amber-500">Chronic Alert</p><p className="text-xs font-black text-rose-800">{selectedPatientInForm.chronicConditions}</p></div>
                       </div>
                     )}
                   </div>
@@ -1631,7 +1847,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Other Settings Modals - Simplified for brevity but still touch friendly */}
+      {/* Settings Modals */}
+      {/* (Simplified modal logic maintained as per previous file) */}
       {[
         { show: showSymptomForm, set: setShowSymptomForm, editing: editingSymptom, setEditing: setEditingSymptom, title: 'Symptom', color: 'emerald', list: symptoms, setList: setSymptoms },
         { show: showScientificForm, set: setShowScientificForm, editing: editingScientificName, setEditing: setEditingScientificName, title: 'Scientific Name', color: 'indigo', list: scientificNames, setList: setScientificNames },
