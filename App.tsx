@@ -738,7 +738,7 @@ const App: React.FC = () => {
       .filter(v => {
         if (!s) return true;
         const medNames = v.prescribedMeds.map(pm => {
-          const med = medications.find(med => med.id === pm.medicationId);
+          const med = medications.find(m => m.id === pm.medicationId);
           return `${med?.brandName || ''} ${med?.scientificName || ''}`;
         }).join(' ');
         return (
@@ -770,6 +770,13 @@ const App: React.FC = () => {
   const getBrandsForScientific = (scientificLabel: string) => {
     return medications
       .filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
+  // Logic to find brands for a specific company
+  const getBrandsForCompany = (companyLabel: string) => {
+    return medications
+      .filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase())
       .map(m => m.brandName);
   };
 
@@ -1243,7 +1250,11 @@ const App: React.FC = () => {
                     <span className="font-black uppercase tracking-widest text-[9px]">Add New</span>
                   </button>
                   {filteredSettingsItems.map(item => {
-                    const brands = settingsTab === 'scientific' ? getBrandsForScientific(item.label) : [];
+                    const brands = settingsTab === 'scientific' 
+                      ? getBrandsForScientific(item.label) 
+                      : settingsTab === 'companies' 
+                      ? getBrandsForCompany(item.label) 
+                      : [];
                     return (
                     <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between group">
                       <div>
@@ -1256,10 +1267,12 @@ const App: React.FC = () => {
                           </p>
                         )}
                         
-                        {/* Display brands below Scientific Name */}
-                        {settingsTab === 'scientific' && brands.length > 0 && (
+                        {/* Display brands below Scientific Name or Company Name */}
+                        {(settingsTab === 'scientific' || settingsTab === 'companies') && brands.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Available Brands</p>
+                            <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">
+                              {settingsTab === 'scientific' ? 'Available Brands' : 'Registered Medicines'}
+                            </p>
                             <div className="flex flex-wrap gap-1">
                               {brands.map((b, idx) => (
                                 <span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>
@@ -1267,8 +1280,8 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         )}
-                        {settingsTab === 'scientific' && brands.length === 0 && (
-                           <p className="text-[8px] font-bold text-slate-300 italic mt-2 uppercase">No registered brands</p>
+                        {(settingsTab === 'scientific' || settingsTab === 'companies') && brands.length === 0 && (
+                           <p className="text-[8px] font-bold text-slate-300 italic mt-2 uppercase">No registered medicines</p>
                         )}
 
                         {item.stock !== undefined && <p className={`text-[9px] font-black uppercase mt-2 ${item.stock <= item.reorderLevel ? 'text-rose-500' : 'text-slate-500'}`}>Stock: {item.stock} {item.unit}</p>}
