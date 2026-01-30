@@ -46,6 +46,7 @@ export interface VitalDefinition {
 
 export interface PrescribedMed {
   medicationId: string;
+  customName?: string; // Support for medicines not in inventory
   dosage: string;
   frequency: string;
   duration: string;

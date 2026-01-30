@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -226,7 +227,6 @@ const App: React.FC = () => {
   const [patientCounter, setPatientCounter] = useState<number>(() => {
     const saved = localStorage.getItem('smartclinic_patient_counter');
     if (saved) return parseInt(saved, 10);
-    // Initial sync: find max in dummy/initial patients
     const numericCodes = dummyPatients.map(p => {
       const match = p.patientCode.match(/P-(\d+)/);
       return match ? parseInt(match[1], 10) : 0;
@@ -433,7 +433,7 @@ const App: React.FC = () => {
       const vitalsStr = vitalDefinitions.map(vd => v.vitals?.[vd.id] ? `${vd.label}: ${v.vitals[vd.id]} ${vd.unit}` : null).filter(Boolean).join('; ');
       const medsStr = v.prescribedMeds.map(pm => {
         const med = medications.find(m => m.id === pm.medicationId);
-        return `${med?.brandName || 'Unknown'} (${pm.quantity})`;
+        return med ? `${med.brandName} (${pm.quantity})` : `${pm.customName} (${pm.quantity})`;
       }).join('; ');
       return [formatDate(v.date), `"${p?.name || 'Unknown'}"`, `"${v.symptoms || ''}"`, `"${v.diagnosis || ''}"`, `"${vitalsStr}"`, `"${medsStr}"`, v.feeAmount || 0, v.paymentStatus || 'Paid'];
     });
@@ -444,7 +444,8 @@ const App: React.FC = () => {
   const handleWhatsAppShare = (visit: Visit, patient: Patient) => {
     const medsText = visit.prescribedMeds.map(pm => {
       const med = medications.find(m => m.id === pm.medicationId);
-      return `- *${med?.brandName}*: ${pm.quantity}`;
+      const name = med ? med.brandName : pm.customName;
+      return `- *${name}*: ${pm.quantity}`;
     }).join('\n');
     const formattedDate = formatDate(visit.date);
     const message = `*Clinic Visit Summary*\n\n*Name:* ${patient.name}\n*Date of Visit:* ${formattedDate}\n\n*Medications (Qty):*\n${medsText || 'None prescribed'}\n\n_SmartClinic_`;
@@ -570,8 +571,14 @@ const App: React.FC = () => {
     });
 
     const finalPrescribedMeds = tempPrescribedMeds
-      .map(({searchTerm, ...rest}) => rest)
-      .filter(pm => pm.medicationId !== '');
+      .map(({searchTerm, ...rest}) => {
+        // If no ID is selected but there is a searchTerm, treat it as a customName
+        if (!rest.medicationId && searchTerm) {
+          return { ...rest, customName: searchTerm };
+        }
+        return rest;
+      })
+      .filter(pm => pm.medicationId !== '' || pm.customName !== '');
 
     const visitId = editingVisit ? editingVisit.id : Math.random().toString(36).substr(2, 9);
     const newVisit: Visit = {
@@ -655,7 +662,7 @@ const App: React.FC = () => {
       
       const medStrings = v.prescribedMeds.map(pm => {
         const m = medications.find(med => med.id === pm.medicationId);
-        return `${m?.brandName} ${m?.scientificName}`;
+        return m ? `${m.brandName} ${m.scientificName}` : (pm.customName || '');
       }).join(' ');
 
       const combinedData = `
@@ -710,7 +717,7 @@ const App: React.FC = () => {
         flattened.push({
           date: v.date,
           diagnosis: v.diagnosis,
-          medName: med?.brandName || 'Unknown',
+          medName: med ? med.brandName : (pm.customName || 'Unknown'),
           strength: med?.strength || '',
           quantity: pm.quantity,
           dosage: pm.dosage,
@@ -745,7 +752,7 @@ const App: React.FC = () => {
     const patient = patients.find(p => p.id === visit.patientId);
     const medDetails = visit.prescribedMeds.map(pm => {
       const med = medications.find(m => m.id === pm.medicationId);
-      const name = med?.brandName || 'Unknown';
+      const name = med ? med.brandName : (pm.customName || 'Unknown');
       return `${name} x ${pm.quantity || 0}`;
     }).join(', ');
     return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medDetails || 'None'}`;
@@ -757,8 +764,6 @@ const App: React.FC = () => {
 
   const filteredAllergyOptions = useMemo(() => {
     const s = allergySearchTerm.toLowerCase();
-    
-    // Get unique brand names and their associated scientific names
     const brandMap = new Map();
     medications.forEach(m => {
       if (!brandMap.has(m.brandName)) {
@@ -804,7 +809,8 @@ const App: React.FC = () => {
         if (!s) return true;
         const medNames = v.prescribedMeds.map(pm => {
           const med = medications.find(med => med.id === pm.medicationId);
-          return `${med?.brandName || ''} ${med?.scientificName || ''}`;
+          const name = med ? `${med.brandName} ${med.scientificName}` : (pm.customName || '');
+          return name;
         }).join(' ');
         return (
           v.diagnosis.toLowerCase().includes(s) ||
@@ -816,19 +822,33 @@ const App: React.FC = () => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [selectedPatientId, visits, historySearchTerm, medications]);
 
-  // New logic to check medicine allergy for a patient
-  const checkMedAllergy = (medId: string) => {
+  // --- Improved Allergy Risk Detection ---
+  const checkMedAllergy = (pm: PrescribedMed & { searchTerm?: string }) => {
     const p = selectedPatientInForm;
-    if (!p || !p.allergies || !medId) return false;
-    const med = medications.find(m => m.id === medId);
-    if (!med) return false;
-
-    // Split patient allergies
+    if (!p || !p.allergies) return false;
+    
     const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
-    const medSci = med.scientificName.toLowerCase().trim();
-    const medBrand = med.brandName.toLowerCase().trim();
-
-    return allergiesArray.some(a => a === medSci || a === medBrand);
+    
+    // 1. Check against selected inventory medicine
+    if (pm.medicationId) {
+      const med = medications.find(m => m.id === pm.medicationId);
+      if (med) {
+        const medSci = med.scientificName.toLowerCase().trim();
+        const medBrand = med.brandName.toLowerCase().trim();
+        if (allergiesArray.some(a => a === medSci || a === medBrand)) {
+          return true;
+        }
+      }
+    }
+    
+    // 2. Check against manual search term (custom name)
+    const nameToCheck = pm.searchTerm || pm.customName;
+    if (nameToCheck) {
+      const lowerName = nameToCheck.toLowerCase().trim();
+      if (allergiesArray.some(a => a === lowerName)) return true;
+    }
+    
+    return false;
   };
 
   // Logic to find brands for a specific scientific name
@@ -847,22 +867,20 @@ const App: React.FC = () => {
 
   // Analytics Helpers
   const analyticsData = useMemo(() => {
-    // 1. Most Prescribed Medications (from Visits)
     const medFrequency: Record<string, number> = {};
     visits.forEach(v => {
       v.prescribedMeds.forEach(pm => {
         const med = medications.find(m => m.id === pm.medicationId);
-        if (med) {
-          medFrequency[med.brandName] = (medFrequency[med.brandName] || 0) + 1;
+        const name = med ? med.brandName : pm.customName;
+        if (name) {
+          medFrequency[name] = (medFrequency[name] || 0) + 1;
         }
       });
     });
-    // Explicitly cast for arithmetic sort
     const topPrescribed = Object.entries(medFrequency)
       .sort((a, b) => (b[1] as number) - (a[1] as number))
       .slice(0, 5);
 
-    // 2. Revenue Trends (last 7 days)
     const last7Days = Array.from({ length: 7 }, (_, i) => {
       const d = new Date();
       d.setDate(d.getDate() - (6 - i));
@@ -879,7 +897,6 @@ const App: React.FC = () => {
       return { date, total: vTotal + pTotal };
     });
 
-    // 3. Demographics
     const ages: Record<string, number> = { 
       'Children (0-17)': 0, 
       'Adults (18-54)': 0, 
@@ -931,7 +948,7 @@ const App: React.FC = () => {
           <SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} />
           <SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} />
-          <SidebarItem icon={<ShoppingCart size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} />
+          <SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} />
           <SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} />
           <SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} />
           <SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
@@ -945,7 +962,6 @@ const App: React.FC = () => {
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
                 <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                  {/* Dashboard Card Colors */}
                   <div onClick={() => setView('patients')} className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                     <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
@@ -1248,8 +1264,9 @@ const App: React.FC = () => {
                                         <div className="mt-3 flex flex-wrap gap-2">
                                           {v.prescribedMeds.map((pm, i) => {
                                             const med = medications.find(m => m.id === pm.medicationId);
-                                            return med ? (
-                                              <span key={i} className="px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[10px] font-bold text-slate-600">{med.brandName} <span className="text-blue-500">×{pm.quantity}</span></span>
+                                            const name = med ? med.brandName : pm.customName;
+                                            return name ? (
+                                              <span key={i} className="px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[10px] font-bold text-slate-600">{name} <span className="text-blue-500">×{pm.quantity}</span></span>
                                             ) : null;
                                           })}
                                         </div>
@@ -1635,8 +1652,11 @@ const App: React.FC = () => {
                const f = new FormData(e.currentTarget);
                const name = f.get('tplName') as string;
                const finalPrescribedMeds = tempPrescribedMeds
-                 .map(({searchTerm, ...rest}) => rest)
-                 .filter(pm => pm.medicationId !== '');
+                 .map(({searchTerm, ...rest}) => {
+                    if (!rest.medicationId && searchTerm) return { ...rest, customName: searchTerm };
+                    return rest;
+                 })
+                 .filter(pm => pm.medicationId !== '' || pm.customName !== '');
 
                const d: PrescriptionTemplate = { 
                  id: editingTemplate ? editingTemplate.id : Math.random().toString(36).substr(2, 9),
@@ -1731,14 +1751,12 @@ const App: React.FC = () => {
                 <div className="border-t pt-4 space-y-4">
                   <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
                   
-                  {/* Improved Allergy Selection System */}
                   <div className="space-y-2">
                     <label className="text-[10px] font-black text-rose-400 uppercase ml-1 flex items-center justify-between">
                       Patient Allergies 
                       <span className="text-[8px] opacity-60">Search Brands or Scientific Names</span>
                     </label>
                     
-                    {/* Selected Allergy Tags */}
                     <div className="flex flex-wrap gap-2 mb-2 min-h-[1.5rem]">
                       {selectedAllergies.map((allergy, idx) => (
                         <div key={idx} className="flex items-center gap-2 bg-rose-50 text-rose-700 px-3 py-1.5 rounded-xl border border-rose-100 text-[10px] font-black shadow-sm animate-in zoom-in">
@@ -1753,7 +1771,6 @@ const App: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Allergy Search Input & Dropdown */}
                     <div className="relative">
                       <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
@@ -1776,7 +1793,6 @@ const App: React.FC = () => {
                         )}
                       </div>
                       
-                      {/* Dropdown Results */}
                       {showAllergyDropdown && allergySearchTerm.trim() && (
                         <div className="absolute z-[600] left-0 right-0 mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-56 overflow-y-auto divide-y divide-slate-50 overflow-hidden animate-in slide-in-from-top-2">
                           {filteredAllergyOptions
@@ -1894,7 +1910,7 @@ const App: React.FC = () => {
                         const selectedMed = medications.find(m => m.id === pm.medicationId); 
                         const isSearching = activeMedSearchIndex === idx; 
                         const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
-                        const isAllergic = pm.medicationId ? checkMedAllergy(pm.medicationId) : false;
+                        const isAllergic = checkMedAllergy(pm);
 
                         return (
                         <div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all ${isAllergic ? 'border-red-500 bg-red-50 shadow-red-100' : 'border-slate-100 shadow-sm'}`}>
@@ -1905,12 +1921,77 @@ const App: React.FC = () => {
                           )}
                           <div className="flex items-center gap-3">
                             <div className="flex-grow relative">
-                              <input type="text" placeholder="Search..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-xs outline-none bg-transparent" />
-                              {isSearching && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-xl z-[400] max-h-40 overflow-y-auto">{filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate">{m.brandName}</button>)) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}</div>)}
+                              <input 
+                                type="text" 
+                                placeholder="Search inventory or type new..." 
+                                value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} 
+                                onFocus={() => { 
+                                  setActiveMedSearchIndex(idx); 
+                                  const newList = [...tempPrescribedMeds]; 
+                                  newList[idx].searchTerm = selectedMed?.brandName || pm.customName || ''; 
+                                  setTempPrescribedMeds(newList); 
+                                }} 
+                                onChange={(e) => { 
+                                  const newList = [...tempPrescribedMeds]; 
+                                  newList[idx].searchTerm = e.target.value; 
+                                  // Clear ID if they keep typing something new
+                                  if (newList[idx].medicationId) {
+                                      newList[idx].medicationId = '';
+                                  }
+                                  setTempPrescribedMeds(newList); 
+                                }} 
+                                className="w-full font-black text-xs outline-none bg-transparent" 
+                              />
+                              {isSearching && (
+                                <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-xl z-[400] max-h-40 overflow-y-auto">
+                                  {filteredMedsList.length > 0 ? (
+                                    filteredMedsList.map(m => (
+                                      <button 
+                                        key={m.id} 
+                                        type="button" 
+                                        onClick={() => { 
+                                          const newList = [...tempPrescribedMeds]; 
+                                          newList[idx].medicationId = m.id; 
+                                          newList[idx].customName = undefined;
+                                          newList[idx].searchTerm = undefined; 
+                                          setTempPrescribedMeds(newList); 
+                                          setActiveMedSearchIndex(null); 
+                                        }} 
+                                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate"
+                                      >
+                                        {m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span>
+                                      </button>
+                                    ))
+                                  ) : pm.searchTerm?.trim() ? (
+                                    <button 
+                                      type="button" 
+                                      onClick={() => { 
+                                        const newList = [...tempPrescribedMeds]; 
+                                        newList[idx].customName = pm.searchTerm;
+                                        newList[idx].medicationId = '';
+                                        newList[idx].searchTerm = undefined; 
+                                        setTempPrescribedMeds(newList); 
+                                        setActiveMedSearchIndex(null); 
+                                      }}
+                                      className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"
+                                    >
+                                      <Plus size={12} /> Add "{pm.searchTerm}" as non-listed med
+                                    </button>
+                                  ) : (
+                                    <div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <button type="button" onClick={() => { const newList = tempPrescribedMeds.filter((_, i) => i !== idx); setTempPrescribedMeds(newList); }} className="text-slate-300"><Trash2 size={14}/></button>
                           </div>
-                          <div className="flex gap-2 items-center"><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div></div>
+                          <div className="flex gap-2 items-center">
+                            {!selectedMed && pm.customName && (
+                                <span className="text-[8px] font-black uppercase text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full">Custom Med</span>
+                            )}
+                            <div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div>
+                            <div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div>
+                          </div>
                         </div>); 
                       })}
                       {tempPrescribedMeds.length === 0 && (<div className="py-6 border-2 border-dashed border-slate-100 rounded-2xl text-center text-slate-300 font-black uppercase text-[9px]">No meds added</div>)}
@@ -2022,7 +2103,7 @@ const App: React.FC = () => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
           const medDetails = printingVisit.prescribedMeds.map(pm => {
             const med = medications.find(m => m.id === pm.medicationId);
-            const name = med?.brandName || 'Unknown';
+            const name = med ? med.brandName : (pm.customName || 'Unknown');
             const duration = pm.duration ? ` (Dur: ${pm.duration})` : '';
             return `${name}${duration}`;
           }).join(', ');
