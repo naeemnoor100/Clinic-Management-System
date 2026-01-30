@@ -1804,7 +1804,9 @@ const App: React.FC = () => {
                     return (
                     <div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}>
                       <div>
-                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
+                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">
+                          {item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}
+                        </h3>
                         {(item.diagnosis || item.scientificName) && (
                           <p className="text-[10px] text-slate-400 italic mt-1 truncate">
                             {item.diagnosis || item.scientificName}
@@ -2184,7 +2186,7 @@ const App: React.FC = () => {
                     <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Deep Search Patient</label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={16} />
-                      <input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none text-sm transition-all shadow-sm" />
+                      <input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all shadow-sm" />
                       {patientFormSearch && <button type="button" onClick={() => { setPatientFormSearch(''); setFormSelectedPatientId(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     {showPatientResults && patientFormResults.length > 0 && (
