@@ -47,7 +47,9 @@ import {
   User,
   BarChart3,
   PieChart,
-  TrendingDown
+  TrendingDown,
+  Bell,
+  Inbox
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -198,7 +200,7 @@ const SidebarItem: React.FC<{ icon: React.ReactNode; label: string; active?: boo
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('dashboard');
-  const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates'>('vitals');
+  const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock'>('vitals');
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
   const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
   
@@ -209,6 +211,7 @@ const App: React.FC = () => {
   const [settingsSearchTerm, setSettingsSearchTerm] = useState('');
   const [historySearchTerm, setHistorySearchTerm] = useState('');
   const [billingDate, setBillingDate] = useState<string>(''); 
+  const [showNotifications, setShowNotifications] = useState(false);
   
   const [patients, setPatients] = useState<Patient[]>(() => getFromLocal('patients', dummyPatients));
   const [medications, setMedications] = useState<Medication[]>(() => getFromLocal('meds', dummyMeds));
@@ -306,6 +309,7 @@ const App: React.FC = () => {
         setAllergySearchTerm('');
         setSelectedAllergies([]);
         setShowAllergyDropdown(false);
+        setShowNotifications(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -522,6 +526,7 @@ const App: React.FC = () => {
         case 'vitals': return vitalDefinitions;
         case 'templates': return prescriptionTemplates;
         case 'meds': return medications;
+        case 'low_stock': return medications.filter(m => m.stock <= m.reorderLevel);
         default: return [];
       }
     }
@@ -563,6 +568,13 @@ const App: React.FC = () => {
           const searchableString = [
             m.brandName, m.scientificName, m.companyName, m.category, m.type, m.strength, m.unit,
             m.pricePerUnit.toString(), isLowStock ? 'low stock' : 'in stock'
+          ].join(' ').toLowerCase();
+          return searchableString.includes(s);
+        });
+      case 'low_stock':
+        return medications.filter(m => m.stock <= m.reorderLevel).filter(m => {
+          const searchableString = [
+            m.brandName, m.scientificName, m.companyName, m.category, m.type, m.strength, m.unit
           ].join(' ').toLowerCase();
           return searchableString.includes(s);
         });
@@ -766,13 +778,14 @@ const App: React.FC = () => {
   const stats = useMemo(() => {
     const consultationIncome = visits.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
     const pharmacyIncome = pharmacySales.reduce((sum, s) => sum + s.totalAmount, 0);
-    const lowStockCount = medications.filter(m => m.stock <= m.reorderLevel).length;
+    const lowStockItems = medications.filter(m => m.stock <= m.reorderLevel);
     return {
       totalPatients: patients.length,
       totalVisits: visits.length,
       collected: consultationIncome + pharmacyIncome,
       pending: visits.filter(v => v.paymentStatus === 'Pending').reduce((sum, v) => sum + (v.feeAmount || 0), 0),
-      lowStockCount
+      lowStockCount: lowStockItems.length,
+      lowStockItems
     };
   }, [patients, visits, pharmacySales, medications]);
 
@@ -1090,16 +1103,72 @@ const App: React.FC = () => {
           <div className="bg-blue-600 p-2 rounded-xl text-white"><Stethoscope size={20} /></div>
           <span className="text-lg font-black text-slate-800 tracking-tighter">SmartClinic</span>
         </div>
-        <button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg">
-          <Plus size={20} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setShowNotifications(!showNotifications)}
+            className="relative p-2 bg-slate-50 text-slate-500 rounded-xl"
+          >
+            <Bell size={20} />
+            {stats.lowStockCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-[8px] text-white font-black animate-bounce">{stats.lowStockCount}</span>
+            )}
+          </button>
+          <button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg">
+            <Plus size={20} />
+          </button>
+        </div>
       </header>
 
       {/* Desktop Sidebar */}
       <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
-        <div className="flex items-center gap-4 px-2">
-           <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div>
-           <div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div>
+        <div className="flex items-center justify-between px-2">
+           <div className="flex items-center gap-4">
+             <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div>
+             <div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div>
+           </div>
+           <div className="relative">
+             <button 
+               onClick={() => setShowNotifications(!showNotifications)}
+               className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative"
+             >
+               <Bell size={22} className={stats.lowStockCount > 0 ? "animate-[pulse_2s_infinite]" : ""} />
+               {stats.lowStockCount > 0 && (
+                 <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-50"></span>
+               )}
+             </button>
+             {showNotifications && (
+               <div className="absolute left-full ml-4 top-0 w-72 bg-white border border-slate-200 shadow-2xl rounded-3xl z-[500] p-6 animate-in slide-in-from-left-4 overflow-hidden">
+                 <div className="flex items-center justify-between mb-4">
+                   <h4 className="text-xs font-black uppercase text-slate-400 tracking-widest">Inventory Alerts</h4>
+                   <button onClick={() => setShowNotifications(false)} className="text-slate-300 hover:text-slate-500"><X size={16}/></button>
+                 </div>
+                 <div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+                   {stats.lowStockCount > 0 ? stats.lowStockItems.map(m => (
+                     <div key={m.id} className="p-3 bg-rose-50 border border-rose-100 rounded-xl">
+                        <div className="flex justify-between items-start gap-2">
+                          <p className="text-[11px] font-black text-rose-800 leading-tight">{m.brandName}</p>
+                          <span className="text-[9px] font-bold text-rose-500 whitespace-nowrap">Stock: {m.stock}</span>
+                        </div>
+                        <p className="text-[9px] font-bold text-rose-400 uppercase mt-1">Reorder Level: {m.reorderLevel}</p>
+                     </div>
+                   )) : (
+                     <div className="py-10 text-center text-slate-300">
+                        <CheckCircle2 size={32} className="mx-auto mb-2 opacity-20" />
+                        <p className="text-[10px] font-black uppercase">All stock levels normal</p>
+                     </div>
+                   )}
+                 </div>
+                 {stats.lowStockCount > 0 && (
+                   <button 
+                    onClick={() => { setView('settings'); setSettingsTab('low_stock'); setShowNotifications(false); }}
+                    className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all"
+                   >
+                     Manage Procurement
+                   </button>
+                 )}
+               </div>
+             )}
+           </div>
         </div>
         <nav className="flex flex-col gap-3 flex-grow">
           <SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
@@ -1131,9 +1200,13 @@ const App: React.FC = () => {
                     <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Unpaid Clinical Fees</p>
                     <p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.pending.toLocaleString()}<Wallet size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                   </div>
-                  <div onClick={() => { setView('settings'); setSettingsTab('meds'); }} className="bg-gradient-to-br from-rose-500 to-pink-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                    <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Low Stock Medicines</p>
-                    <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                  <div onClick={() => { setView('settings'); setSettingsTab('low_stock'); }} className="bg-gradient-to-br from-rose-500 to-pink-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group relative overflow-hidden">
+                    <div className="relative z-10">
+                      <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Critical Stock Alert</p>
+                      <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
+                      <p className="text-[8px] font-black uppercase mt-2 bg-white/20 w-fit px-2 py-0.5 rounded-full">Procurement required</p>
+                    </div>
+                    {stats.lowStockCount > 0 && <span className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl animate-pulse"></span>}
                   </div>
                   <div onClick={() => setView('visits')} className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                      <div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div>
@@ -1672,6 +1745,7 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">
                     {[
+                      { id: 'low_stock', label: 'Critical Stock', icon: <ShieldAlert size={12} className="text-rose-500"/> },
                       { id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> }, 
                       { id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> }, 
                       { id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> },
@@ -1680,7 +1754,18 @@ const App: React.FC = () => {
                       { id: 'companies', label: 'Companies', icon: <Building2 size={12}/> }, 
                       { id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> }, 
                       { id: 'med_types', label: 'Types', icon: <Tags size={12}/> }
-                    ].map(tab => (<button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}</button>))}
+                    ].map(tab => (
+                      <button 
+                        key={tab.id} 
+                        onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} 
+                        className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap relative ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        {tab.icon} {tab.label}
+                        {tab.id === 'low_stock' && stats.lowStockCount > 0 && (
+                          <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>
+                        )}
+                      </button>
+                    ))}
                   </div>
                   <div className="relative w-full group">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
@@ -1690,46 +1775,47 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-in slide-in-from-bottom-4">
-                  <button onClick={() => {
-                    if(settingsTab === 'templates') setShowTemplateForm(true);
-                    else if(settingsTab === 'symptoms') setShowSymptomForm(true);
-                    else if(settingsTab === 'scientific') setShowScientificForm(true);
-                    else if(settingsTab === 'companies') setShowCompanyForm(true);
-                    else if(settingsTab === 'med_categories') setShowCategoryForm(true);
-                    else if(settingsTab === 'med_types') setShowTypeForm(true);
-                    else if(settingsTab === 'vitals') setShowVitalDefForm(true);
-                    else if(settingsTab === 'meds') setShowMedForm(true);
-                  }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]">
-                    <Plus size={32} />
-                    <span className="font-black uppercase tracking-widest text-[9px]">Add New</span>
-                  </button>
+                  {settingsTab !== 'low_stock' && (
+                    <button onClick={() => {
+                      if(settingsTab === 'templates') setShowTemplateForm(true);
+                      else if(settingsTab === 'symptoms') setShowSymptomForm(true);
+                      else if(settingsTab === 'scientific') setShowScientificForm(true);
+                      else if(settingsTab === 'companies') setShowCompanyForm(true);
+                      else if(settingsTab === 'med_categories') setShowCategoryForm(true);
+                      else if(settingsTab === 'med_types') setShowTypeForm(true);
+                      else if(settingsTab === 'vitals') setShowVitalDefForm(true);
+                      else if(settingsTab === 'meds') setShowMedForm(true);
+                    }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]">
+                      <Plus size={32} />
+                      <span className="font-black uppercase tracking-widest text-[9px]">Add New</span>
+                    </button>
+                  )}
                   {filteredSettingsItems.map(item => {
-                    const brands = settingsTab === 'scientific' 
-                      ? getBrandsForScientific(item.label) 
-                      : settingsTab === 'companies' 
-                      ? getBrandsForCompany(item.label) 
-                      : settingsTab === 'med_categories'
-                      ? getBrandsForCategory(item.label)
-                      : settingsTab === 'med_types'
-                      ? getBrandsForType(item.label)
+                    const brands = (settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') 
+                      ? (settingsTab === 'scientific' ? getBrandsForScientific(item.label) : 
+                         settingsTab === 'companies' ? getBrandsForCompany(item.label) : 
+                         settingsTab === 'med_categories' ? getBrandsForCategory(item.label) : 
+                         getBrandsForType(item.label))
                       : [];
+                    
+                    const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock';
+                    const med = item as Medication;
+
                     return (
-                    <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex flex-col justify-between group">
+                    <div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}>
                       <div>
                         <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
                         {(item.diagnosis || item.scientificName) && (
                           <p className="text-[10px] text-slate-400 italic mt-1 truncate">
                             {item.diagnosis || item.scientificName}
-                            {settingsTab === 'meds' && (item as Medication).category && ` • ${(item as Medication).category}`}
-                            {settingsTab === 'meds' && (item as Medication).type && ` • ${(item as Medication).type}`}
+                            {isMedLike && med.category && ` • ${med.category}`}
+                            {isMedLike && med.type && ` • ${med.type}`}
                           </p>
                         )}
                         
-                        {(settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') && brands.length > 0 && (
+                        {brands.length > 0 && (
                           <div className="mt-3">
-                            <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">
-                              Registered Medicines
-                            </p>
+                            <p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Registered Medicines</p>
                             <div className="flex flex-wrap gap-1">
                               {brands.map((b, idx) => (
                                 <span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>
@@ -1737,11 +1823,19 @@ const App: React.FC = () => {
                             </div>
                           </div>
                         )}
-                        {(settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') && brands.length === 0 && (
-                           <p className="text-[8px] font-bold text-slate-300 italic mt-2 uppercase">No registered medicines</p>
-                        )}
 
-                        {item.stock !== undefined && <p className={`text-[9px] font-black uppercase mt-2 ${item.stock <= item.reorderLevel ? 'text-rose-500' : 'text-slate-500'}`}>Stock: {item.stock} {item.unit}</p>}
+                        {isMedLike && (
+                          <div className="mt-3 space-y-1">
+                            <p className={`text-[9px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-600' : 'text-slate-500'}`}>Current Stock: {med.stock} {med.unit}</p>
+                            <p className="text-[8px] font-bold text-slate-400 uppercase">Alert Level: {med.reorderLevel}</p>
+                            {med.stock <= med.reorderLevel && (
+                              <div className="mt-2 flex items-center gap-1.5 text-rose-500 animate-pulse">
+                                <AlertTriangle size={10} />
+                                <span className="text-[8px] font-black uppercase">Low Stock Critical</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="mt-4 pt-3 border-t flex justify-end gap-1">
                          <button onClick={() => { 
@@ -1752,8 +1846,8 @@ const App: React.FC = () => {
                            else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); }
                            else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); }
                            else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); }
-                           else if(settingsTab === 'meds') { setEditingMedication(item); setShowMedForm(true); }
-                         }} className="p-2 text-slate-300 hover:text-blue-500"><Edit2 size={16}/></button>
+                           else if(isMedLike) { setEditingMedication(med); setShowMedForm(true); }
+                         }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button>
                          <button onClick={() => {
                            if(settingsTab === 'templates') setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id));
                            else if(settingsTab === 'symptoms') setSymptoms(prev => prev.filter(i => i.id !== item.id));
@@ -1762,11 +1856,17 @@ const App: React.FC = () => {
                            else if(settingsTab === 'med_categories') setMedCategories(prev => prev.filter(i => i.id !== item.id));
                            else if(settingsTab === 'med_types') setMedTypes(prev => prev.filter(i => i.id !== item.id));
                            else if(settingsTab === 'vitals') setVitalDefinitions(prev => prev.filter(i => i.id !== item.id));
-                           else if(settingsTab === 'meds') setMedications(prev => prev.filter(i => i.id !== item.id));
-                         }} className="p-2 text-slate-300 hover:text-red-500"><Trash2 size={16}/></button>
+                           else if(isMedLike) setMedications(prev => prev.filter(i => i.id !== item.id));
+                         }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
                       </div>
                     </div>
                   )})}
+                  {settingsTab === 'low_stock' && filteredSettingsItems.length === 0 && (
+                    <div className="col-span-full py-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center gap-4">
+                      <Inbox size={48} className="text-slate-100" />
+                      <p className="text-slate-400 font-bold uppercase text-xs">No items currently below reorder levels</p>
+                    </div>
+                  )}
                 </div>
              </div>
            )}
@@ -1872,15 +1972,53 @@ const App: React.FC = () => {
                     {tempPrescribedMeds.map((pm, idx) => {
                       const selectedMed = medications.find(m => m.id === pm.medicationId);
                       const isSearching = activeMedSearchIndex === idx;
-                      const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()));
+                      const filteredMedsList = medications.filter(m => 
+                        m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()) || 
+                        m.scientificName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())
+                      );
                       return (
                         <div key={idx} className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100 flex flex-col gap-3">
                           <div className="flex items-center gap-3">
                             <div className="flex-grow relative group">
-                              <input type="text" placeholder="Search Medicine..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => setActiveMedSearchIndex(idx)} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-sm outline-none bg-transparent" />
+                              <input type="text" placeholder="Search inventory or type new..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} onFocus={() => setActiveMedSearchIndex(idx)} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; if (newList[idx].medicationId) newList[idx].medicationId = ''; setTempPrescribedMeds(newList); }} className="w-full font-black text-sm outline-none bg-transparent" />
                               {isSearching && (
                                 <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">
-                                  {filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 last:border-none font-bold text-xs">{m.brandName}</button>)) : <div className="p-3 text-slate-300 text-[10px] text-center uppercase">No Match</div>}
+                                  {filteredMedsList.length > 0 ? (
+                                    filteredMedsList.map(m => (
+                                      <button 
+                                        key={m.id} 
+                                        type="button" 
+                                        onClick={() => { 
+                                          const newList = [...tempPrescribedMeds]; 
+                                          newList[idx].medicationId = m.id; 
+                                          newList[idx].customName = undefined;
+                                          newList[idx].searchTerm = undefined; 
+                                          setTempPrescribedMeds(newList); 
+                                          setActiveMedSearchIndex(null); 
+                                        }} 
+                                        className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 last:border-none font-black text-[10px] truncate"
+                                      >
+                                        {m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span>
+                                      </button>
+                                    ))
+                                  ) : pm.searchTerm?.trim() ? (
+                                    <button 
+                                      type="button" 
+                                      onClick={() => { 
+                                        const newList = [...tempPrescribedMeds]; 
+                                        newList[idx].customName = pm.searchTerm;
+                                        newList[idx].medicationId = '';
+                                        newList[idx].searchTerm = undefined; 
+                                        setTempPrescribedMeds(newList); 
+                                        setActiveMedSearchIndex(null); 
+                                      }}
+                                      className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"
+                                    >
+                                      <Plus size={12} /> Add "{pm.searchTerm}" as non-listed med
+                                    </button>
+                                  ) : (
+                                    <div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2094,7 +2232,7 @@ const App: React.FC = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-10">
                   <div className="space-y-6">
-                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1 flex items-center gap-2"><Droplets size={14} className="text-blue-500" /> Symptoms</label><div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-3 md:p-4 border-2 border-slate-100 rounded-2xl md:rounded-3xl bg-white shadow-inner">{symptoms.map(s => (<label key={s.id} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-100 cursor-pointer hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 group"><input type="checkbox" name="selectedSymptoms" value={s.label} defaultChecked={editingVisit?.symptoms?.includes(s.label)} className="hidden" /><span className="text-[10px] font-black text-slate-500 group-has-[:checked]:text-blue-700">{s.label}</span></label>))}</div></div>
                   </div>
                   <div className="space-y-4">
@@ -2103,7 +2241,10 @@ const App: React.FC = () => {
                       {tempPrescribedMeds.map((pm, idx) => { 
                         const selectedMed = medications.find(m => m.id === pm.medicationId); 
                         const isSearching = activeMedSearchIndex === idx; 
-                        const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
+                        const filteredMedsList = medications.filter(m => 
+                          m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()) || 
+                          m.scientificName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())
+                        ); 
                         const isAllergic = checkMedAllergy(pm);
 
                         return (
