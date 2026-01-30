@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -223,6 +222,22 @@ const App: React.FC = () => {
   const [visits, setVisits] = useState<Visit[]>(() => getFromLocal('visits', []));
   const [pharmacySales, setPharmacySales] = useState<PharmacySale[]>(() => getFromLocal('pharmacy_sales', []));
   
+  // --- Persistent Patient Code Logic ---
+  const [patientCounter, setPatientCounter] = useState<number>(() => {
+    const saved = localStorage.getItem('smartclinic_patient_counter');
+    if (saved) return parseInt(saved, 10);
+    // Initial sync: find max in dummy/initial patients
+    const numericCodes = dummyPatients.map(p => {
+      const match = p.patientCode.match(/P-(\d+)/);
+      return match ? parseInt(match[1], 10) : 0;
+    });
+    return Math.max(...numericCodes, 0);
+  });
+
+  useEffect(() => {
+    localStorage.setItem('smartclinic_patient_counter', patientCounter.toString());
+  }, [patientCounter]);
+
   const [cart, setCart] = useState<{ medicationId: string, quantity: number }[]>([]);
   const [walkinName, setWalkinName] = useState('Walk-in Customer');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
@@ -342,11 +357,18 @@ const App: React.FC = () => {
       const content = e.target?.result as string;
       const lines = content.split('\n').filter(l => l.trim() !== '');
       if (lines.length < 2) return;
+      
+      let maxImportedNum = patientCounter;
       const newPatients: Patient[] = lines.slice(1).map(line => {
         const [code, name, age, gender, phone, address, allergies, chronic] = line.split(',');
+        const match = (code || '').match(/P-(\d+)/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxImportedNum) maxImportedNum = num;
+        }
         return {
           id: Math.random().toString(36).substr(2, 9),
-          patientCode: code || `P-${Math.floor(Math.random() * 9000) + 1000}`,
+          patientCode: code || 'ERROR',
           name: name || 'Unknown',
           age: parseInt(age) || 0,
           gender: (gender as any) || 'Male',
@@ -358,6 +380,7 @@ const App: React.FC = () => {
       });
       if (window.confirm(`Import ${newPatients.length} patients? Current patient data will be replaced.`)) {
         setPatients(newPatients);
+        setPatientCounter(maxImportedNum);
       }
     };
     reader.readAsText(file);
@@ -922,7 +945,7 @@ const App: React.FC = () => {
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
                 <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                  {/* Updated Dashboard Card Colors */}
+                  {/* Dashboard Card Colors */}
                   <div onClick={() => setView('patients')} className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                     <p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Patients</p>
                     <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
@@ -1069,7 +1092,7 @@ const App: React.FC = () => {
                </div>
              </div>
            )}
-           {/* Rest of the component remains the same */}
+
            {view === 'patients' && (
              <div className="space-y-6 animate-in fade-in">
                <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
@@ -1690,7 +1713,9 @@ const App: React.FC = () => {
                }; 
                if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); 
                else { 
-                 const code = `P-${(patients.length + 1).toString().padStart(4, '0')}`; 
+                 const nextNum = patientCounter + 1;
+                 const code = `P-${nextNum.toString().padStart(4, '0')}`;
+                 setPatientCounter(nextNum);
                  setPatients(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), patientCode: code, ...d }]); 
                } 
                setShowPatientForm(false); 
