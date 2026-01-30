@@ -461,31 +461,111 @@ const App: React.FC = () => {
     }, 300);
   };
 
+  // --- Enhanced Deep Search for Patients ---
   const filteredPatients = useMemo(() => {
-    return patients.filter(p => {
-      const s = patientSearchTerm.toLowerCase();
-      return p.name.toLowerCase().includes(s) || p.phone.toLowerCase().includes(s) || p.patientCode.toLowerCase().includes(s);
-    });
-  }, [patients, patientSearchTerm]);
+    const s = patientSearchTerm.toLowerCase();
+    if (!s) return patients;
 
+    return patients.filter(p => {
+      // Get visit data for date search
+      const pVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const lastVisitFormatted = pVisits.length > 0 ? formatDate(pVisits[0].date) : '';
+
+      const searchableString = [
+        p.name,
+        p.phone,
+        p.patientCode,
+        p.age.toString(),
+        p.gender,
+        p.address,
+        p.allergies || '',
+        p.chronicConditions || '',
+        lastVisitFormatted
+      ].join(' ').toLowerCase();
+
+      return searchableString.includes(s);
+    });
+  }, [patients, patientSearchTerm, visits]);
+
+  // --- Enhanced Deep Search for Pharmacy ---
   const filteredMeds = useMemo(() => {
+    const s = medSearchTerm.toLowerCase();
+    if (!s) return medications;
     return medications.filter(m => {
-      const s = medSearchTerm.toLowerCase();
-      return m.brandName.toLowerCase().includes(s) || m.scientificName.toLowerCase().includes(s) || m.companyName.toLowerCase().includes(s) || m.category.toLowerCase().includes(s);
+      const isLowStock = m.stock <= m.reorderLevel;
+      const searchableString = [
+        m.brandName,
+        m.scientificName,
+        m.companyName,
+        m.category,
+        m.type,
+        m.strength,
+        m.unit,
+        m.pricePerUnit.toString(),
+        isLowStock ? 'low stock reorder' : 'available in stock',
+        m.stock.toString()
+      ].join(' ').toLowerCase();
+      return searchableString.includes(s);
     });
   }, [medications, medSearchTerm]);
 
+  // --- Enhanced Deep Search for Settings ---
   const filteredSettingsItems = useMemo(() => {
     const s = settingsSearchTerm.toLowerCase();
+    if (!s) {
+      switch (settingsTab) {
+        case 'symptoms': return symptoms;
+        case 'scientific': return scientificNames;
+        case 'med_categories': return medCategories;
+        case 'med_types': return medTypes;
+        case 'companies': return companyNames;
+        case 'vitals': return vitalDefinitions;
+        case 'templates': return prescriptionTemplates;
+        case 'meds': return medications;
+        default: return [];
+      }
+    }
+
     switch (settingsTab) {
       case 'symptoms': return symptoms.filter(i => i.label.toLowerCase().includes(s));
-      case 'scientific': return scientificNames.filter(i => i.label.toLowerCase().includes(s));
-      case 'med_categories': return medCategories.filter(i => i.label.toLowerCase().includes(s));
-      case 'med_types': return medTypes.filter(i => i.label.toLowerCase().includes(s));
-      case 'companies': return companyNames.filter(i => i.label.toLowerCase().includes(s));
-      case 'vitals': return vitalDefinitions.filter(i => i.label.toLowerCase().includes(s));
-      case 'templates': return prescriptionTemplates.filter(i => i.name.toLowerCase().includes(s));
-      case 'meds': return medications.filter(i => i.brandName.toLowerCase().includes(s) || i.scientificName.toLowerCase().includes(s));
+      case 'scientific': 
+        return scientificNames.filter(i => {
+          const brands = medications.filter(m => m.scientificName === i.label).map(m => m.brandName).join(' ');
+          return i.label.toLowerCase().includes(s) || brands.toLowerCase().includes(s);
+        });
+      case 'med_categories': 
+        return medCategories.filter(i => {
+          const brands = medications.filter(m => m.category === i.label).map(m => m.brandName).join(' ');
+          return i.label.toLowerCase().includes(s) || brands.toLowerCase().includes(s);
+        });
+      case 'med_types': 
+        return medTypes.filter(i => {
+          const brands = medications.filter(m => m.type === i.label).map(m => m.brandName).join(' ');
+          return i.label.toLowerCase().includes(s) || brands.toLowerCase().includes(s);
+        });
+      case 'companies': 
+        return companyNames.filter(i => {
+          const brands = medications.filter(m => m.companyName === i.label).map(m => m.brandName).join(' ');
+          return i.label.toLowerCase().includes(s) || brands.toLowerCase().includes(s);
+        });
+      case 'vitals': return vitalDefinitions.filter(i => i.label.toLowerCase().includes(s) || i.unit.toLowerCase().includes(s));
+      case 'templates': 
+        return prescriptionTemplates.filter(i => {
+          const medNames = i.prescribedMeds.map(pm => {
+            const med = medications.find(m => m.id === pm.medicationId);
+            return med ? med.brandName : pm.customName;
+          }).join(' ');
+          return i.name.toLowerCase().includes(s) || i.diagnosis.toLowerCase().includes(s) || medNames.toLowerCase().includes(s);
+        });
+      case 'meds': 
+        return medications.filter(m => {
+          const isLowStock = m.stock <= m.reorderLevel;
+          const searchableString = [
+            m.brandName, m.scientificName, m.companyName, m.category, m.type, m.strength, m.unit,
+            m.pricePerUnit.toString(), isLowStock ? 'low stock' : 'in stock'
+          ].join(' ').toLowerCase();
+          return searchableString.includes(s);
+        });
       default: return [];
     }
   }, [settingsTab, symptoms, scientificNames, medCategories, medTypes, companyNames, vitalDefinitions, medications, prescriptionTemplates, settingsSearchTerm]);
@@ -701,15 +781,27 @@ const App: React.FC = () => {
     return patients.find(p => p.id === formSelectedPatientId) || null;
   }, [formSelectedPatientId, patients]);
 
+  // Deep search in encounter patient selection
   const patientFormResults = useMemo(() => {
-    if (!patientFormSearch.trim()) return [];
     const s = patientFormSearch.toLowerCase();
-    return patients.filter(p => 
-      p.name.toLowerCase().includes(s) || 
-      p.phone.includes(s) || 
-      p.patientCode.toLowerCase().includes(s)
-    ).slice(0, 5);
-  }, [patients, patientFormSearch]);
+    if (!s.trim()) return [];
+    
+    return patients.filter(p => {
+      const pVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const lastVisitFormatted = pVisits.length > 0 ? formatDate(pVisits[0].date) : '';
+
+      const searchableString = [
+        p.name,
+        p.phone,
+        p.patientCode,
+        p.age.toString(),
+        p.allergies || '',
+        lastVisitFormatted
+      ].join(' ').toLowerCase();
+
+      return searchableString.includes(s);
+    }).slice(0, 5);
+  }, [patients, patientFormSearch, visits]);
 
   const patientPrescriptions = useMemo(() => {
     if (!selectedPatientId) return [];
@@ -1183,9 +1275,10 @@ const App: React.FC = () => {
                        <button onClick={exportPatientsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export to Excel (CSV)"><FileDown size={18} /></button>
                        <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import from Excel (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportPatientsCsv} /></label>
                     </div>
-                    <div className="relative flex-grow sm:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input type="text" placeholder="Search..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-sm" />
+                    <div className="relative flex-grow sm:w-64 group">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                      <input type="text" placeholder="Deep Search: Name, Phone, Reg#, Age, Allergy, Visit..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
+                      {patientSearchTerm && <button onClick={() => setPatientSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     <button onClick={() => { setEditingPatient(null); setSelectedAllergies([]); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
                  </div>
@@ -1320,17 +1413,17 @@ const App: React.FC = () => {
                            <div className="space-y-4 animate-in fade-in">
                               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                                 <h3 className="text-lg md:text-xl font-black text-slate-800">Visit History</h3>
-                                <div className="relative w-full sm:w-64 no-print">
-                                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                <div className="relative w-full sm:w-64 no-print group">
+                                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
                                   <input 
                                     type="text" 
-                                    placeholder="Filter diagnosis, meds..." 
+                                    placeholder="Filter records..." 
                                     value={historySearchTerm} 
                                     onChange={(e) => setHistorySearchTerm(e.target.value)} 
-                                    className="w-full pl-10 pr-4 py-2 rounded-xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-xs" 
+                                    className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-xs transition-all shadow-sm" 
                                   />
                                   {historySearchTerm && (
-                                    <button onClick={() => setHistorySearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X size={14}/></button>
+                                    <button onClick={() => setHistorySearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>
                                   )}
                                 </div>
                               </div>
@@ -1339,7 +1432,7 @@ const App: React.FC = () => {
                                    <div key={v.id} className="bg-white p-5 md:p-6 rounded-2xl md:rounded-[2rem] border border-slate-100 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-4 group">
                                       <div className="flex-grow">
                                         <p className="text-[10px] text-slate-400 mb-1 font-bold">{formatDate(v.date)}</p>
-                                        <p className="font-bold text-slate-800 leading-tight mb-2 text-sm md:text-base">{v.diagnosis}</p>
+                                        <p className="font-bold text-slate-800 text-sm md:text-base">{v.diagnosis}</p>
                                         <div className="flex flex-wrap gap-1">
                                           {v.symptoms ? v.symptoms.split(', ').map((s, i) => (
                                             <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-black rounded-full uppercase tracking-tighter">{s}</span>
@@ -1423,9 +1516,10 @@ const App: React.FC = () => {
                  <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Clinical Logs</h1>
                  <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
                     <button onClick={exportVisitsCsv} className="p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all shrink-0" title="Export CSV"><FileDown size={18} /></button>
-                    <div className="relative flex-grow sm:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                      <input type="text" placeholder="Search..." value={visitSearchTerm} onChange={(e) => setVisitSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 outline-none font-bold text-sm" />
+                    <div className="relative flex-grow sm:w-64 group">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
+                      <input type="text" placeholder="Search logs..." value={visitSearchTerm} onChange={(e) => setVisitSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
+                      {visitSearchTerm && <button onClick={() => setVisitSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     <button onClick={() => { 
                       setEditingVisit(null); 
@@ -1493,9 +1587,10 @@ const App: React.FC = () => {
                        <button onClick={exportMedsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button>
                        <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label>
                     </div>
-                    <div className="relative flex-grow sm:w-64">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                      <input type="text" placeholder="Search medicines..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold text-sm" />
+                    <div className="relative flex-grow sm:w-64 group">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                      <input type="text" placeholder="Deep Search: Brand, Salt, Company, Cat, Price, Stock..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
+                      {medSearchTerm && <button onClick={() => setMedSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                    </div>
                  </div>
@@ -1587,7 +1682,11 @@ const App: React.FC = () => {
                       { id: 'med_types', label: 'Types', icon: <Tags size={12}/> }
                     ].map(tab => (<button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}</button>))}
                   </div>
-                  <div className="relative w-full"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} /><input type="text" placeholder={`Search...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-bold focus:border-blue-500 outline-none transition-all text-sm" /></div>
+                  <div className="relative w-full group">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
+                    <input type="text" placeholder={`Deep Search in ${settingsTab}: Values, Associations, Brands...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold transition-all text-sm shadow-sm" />
+                    {settingsSearchTerm && <button onClick={() => setSettingsSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>}
+                  </div>
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-in slide-in-from-bottom-4">
@@ -1777,7 +1876,7 @@ const App: React.FC = () => {
                       return (
                         <div key={idx} className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100 flex flex-col gap-3">
                           <div className="flex items-center gap-3">
-                            <div className="flex-grow relative">
+                            <div className="flex-grow relative group">
                               <input type="text" placeholder="Search Medicine..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || '')} onFocus={() => setActiveMedSearchIndex(idx)} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; setTempPrescribedMeds(newList); }} className="w-full font-black text-sm outline-none bg-transparent" />
                               {isSearching && (
                                 <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">
@@ -1862,22 +1961,22 @@ const App: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="relative">
+                    <div className="relative group">
                       <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300" size={14} />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-rose-500 transition-colors" size={14} />
                         <input 
                           type="text" 
                           placeholder="Type to find (e.g. Panadol, Aspirin...)" 
                           value={allergySearchTerm}
                           onFocus={() => setShowAllergyDropdown(true)}
                           onChange={(e) => setAllergySearchTerm(e.target.value)}
-                          className="w-full pl-10 pr-4 py-3 rounded-xl border-2 border-slate-100 bg-slate-50 text-[11px] font-bold focus:border-rose-300 outline-none transition-all"
+                          className="w-full pl-10 pr-10 py-3 rounded-xl border-2 border-slate-100 focus:border-rose-300 focus:ring-4 focus:ring-rose-500/10 bg-slate-50 text-[11px] font-bold outline-none transition-all shadow-sm"
                         />
                         {allergySearchTerm && (
                           <button 
                             type="button" 
                             onClick={() => setAllergySearchTerm('')} 
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
                           >
                             <X size={14} />
                           </button>
@@ -1943,9 +2042,13 @@ const App: React.FC = () => {
              <form onSubmit={handleVisitSubmit} className="p-6 md:p-10 space-y-8 md:space-y-10 bg-slate-50/30 flex-grow overflow-y-auto custom-scrollbar">
                 <input type="hidden" name="patientId" value={formSelectedPatientId || ""} />
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-                  <div className="space-y-2 relative">
-                    <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Search Patient</label>
-                    <input type="text" placeholder="Name or ID..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all" />
+                  <div className="space-y-2 relative group">
+                    <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Deep Search Patient</label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={16} />
+                      <input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none text-sm transition-all shadow-sm" />
+                      {patientFormSearch && <button type="button" onClick={() => { setPatientFormSearch(''); setFormSelectedPatientId(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
+                    </div>
                     {showPatientResults && patientFormResults.length > 0 && (
                       <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-100 shadow-2xl rounded-2xl z-[500] max-h-48 overflow-y-auto">
                         {patientFormResults.map(p => (
@@ -1991,7 +2094,7 @@ const App: React.FC = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-10">
                   <div className="space-y-6">
-                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
+                    <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1 flex items-center gap-2"><Droplets size={14} className="text-blue-500" /> Symptoms</label><div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-3 md:p-4 border-2 border-slate-100 rounded-2xl md:rounded-3xl bg-white shadow-inner">{symptoms.map(s => (<label key={s.id} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-100 cursor-pointer hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 group"><input type="checkbox" name="selectedSymptoms" value={s.label} defaultChecked={editingVisit?.symptoms?.includes(s.label)} className="hidden" /><span className="text-[10px] font-black text-slate-500 group-has-[:checked]:text-blue-700">{s.label}</span></label>))}</div></div>
                   </div>
                   <div className="space-y-4">
@@ -2011,7 +2114,7 @@ const App: React.FC = () => {
                             </div>
                           )}
                           <div className="flex items-center gap-3">
-                            <div className="flex-grow relative">
+                            <div className="flex-grow relative group">
                               <input 
                                 type="text" 
                                 placeholder="Search inventory or type new..." 
@@ -2031,8 +2134,19 @@ const App: React.FC = () => {
                                   }
                                   setTempPrescribedMeds(newList); 
                                 }} 
-                                className="w-full font-black text-xs outline-none bg-transparent" 
+                                className="w-full pr-8 font-black text-xs outline-none bg-transparent" 
                               />
+                              {(pm.searchTerm || selectedMed?.brandName || pm.customName) && (
+                                <button type="button" onClick={() => {
+                                  const newList = [...tempPrescribedMeds];
+                                  newList[idx].searchTerm = '';
+                                  newList[idx].medicationId = '';
+                                  newList[idx].customName = '';
+                                  setTempPrescribedMeds(newList);
+                                }} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors">
+                                  <X size={14}/>
+                                </button>
+                              )}
                               {isSearching && (
                                 <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">
                                   {filteredMedsList.length > 0 ? (
