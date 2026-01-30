@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
@@ -7,7 +8,10 @@
     <meta name="theme-color" content="#2563eb">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400..700&display=swap" rel="stylesheet">
+    <!-- Jameel Noori Nastaleeq CDN -->
+    <link href="https://fonts.cdnfonts.com/css/jameel-noori-nastaleeq" rel="stylesheet">
     <style>
+        /* Define local font faces for fallback */
         @font-face {
             font-family: 'Alvi Nastaleeq';
             src: local('Alvi Nastaleeq'), local('Alvi_Nastaleeq');
@@ -15,7 +19,8 @@
 
         :root {
             --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-            --font-urdu: 'Alvi Nastaleeq', 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif;
+            /* Prioritize Jameel Noori and Alvi as requested */
+            --font-urdu: 'Jameel Noori Nastaleeq', 'Alvi Nastaleeq', 'Noto Nastaliq Urdu', serif;
         }
         
         body {
@@ -23,7 +28,8 @@
             background-color: #f8fafc;
         }
 
-        h1, h2, h3, .urdu-text, input, textarea, select {
+        /* Applying Urdu font to all text containers to handle mixed content gracefully */
+        h1, h2, h3, h4, .urdu-text, input, textarea, select, p, span, button {
             font-family: var(--font-sans), var(--font-urdu);
         }
 
@@ -60,6 +66,12 @@
 
         textarea, input {
             line-height: 1.8 !important;
+        }
+
+        /* Adjusting font rendering for Nastaliq */
+        .urdu-text {
+            direction: rtl;
+            line-height: 2.2;
         }
     </style>
 <script type="importmap">

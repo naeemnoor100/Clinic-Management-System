@@ -49,7 +49,11 @@ import {
   PieChart,
   TrendingDown,
   Bell,
-  Inbox
+  Inbox,
+  Zap,
+  ListPlus,
+  ArrowLeft,
+  ChevronRight
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -204,6 +208,9 @@ const App: React.FC = () => {
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
   const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
   
+  // Pharmacy specific mobile state
+  const [showPharmacyCartMobile, setShowPharmacyCartMobile] = useState(false);
+  
   // Search and Filter States
   const [medSearchTerm, setMedSearchTerm] = useState('');
   const [visitSearchTerm, setVisitSearchTerm] = useState('');
@@ -225,6 +232,9 @@ const App: React.FC = () => {
   const [visits, setVisits] = useState<Visit[]>(() => getFromLocal('visits', []));
   const [pharmacySales, setPharmacySales] = useState<PharmacySale[]>(() => getFromLocal('pharmacy_sales', []));
   
+  // POS specific ref for search bar focus
+  const posSearchRef = useRef<HTMLInputElement>(null);
+
   // --- Persistent Patient Code Logic ---
   const [patientCounter, setPatientCounter] = useState<number>(() => {
     const saved = localStorage.getItem('smartclinic_patient_counter');
@@ -310,11 +320,17 @@ const App: React.FC = () => {
         setSelectedAllergies([]);
         setShowAllergyDropdown(false);
         setShowNotifications(false);
+        setShowPharmacyCartMobile(false);
+      }
+      // POS shortcut: press '/' to focus search
+      if (e.key === '/' && view === 'pharmacy' && document.activeElement?.tagName !== 'INPUT') {
+        e.preventDefault();
+        posSearchRef.current?.focus();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     saveToLocal('patients', patients);
@@ -491,26 +507,30 @@ const App: React.FC = () => {
     });
   }, [patients, patientSearchTerm, visits]);
 
-  // --- Enhanced Deep Search for Pharmacy ---
+  // --- POS Deep Search for Pharmacy ---
   const filteredMeds = useMemo(() => {
     const s = medSearchTerm.toLowerCase();
-    if (!s) return medications;
-    return medications.filter(m => {
-      const isLowStock = m.stock <= m.reorderLevel;
-      const searchableString = [
-        m.brandName,
-        m.scientificName,
-        m.companyName,
-        m.category,
-        m.type,
-        m.strength,
-        m.unit,
-        m.pricePerUnit.toString(),
-        isLowStock ? 'low stock reorder' : 'available in stock',
-        m.stock.toString()
-      ].join(' ').toLowerCase();
-      return searchableString.includes(s);
-    });
+    let result = medications;
+    if (s) {
+      result = medications.filter(m => {
+        const isLowStock = m.stock <= m.reorderLevel;
+        const searchableString = [
+          m.brandName,
+          m.scientificName,
+          m.companyName,
+          m.category,
+          m.type,
+          m.strength,
+          m.unit,
+          m.pricePerUnit.toString(),
+          isLowStock ? 'low stock reorder' : 'available in stock',
+          m.stock.toString()
+        ].join(' ').toLowerCase();
+        return searchableString.includes(s);
+      });
+    }
+    // Alphabetical sort by brand name
+    return [...result].sort((a, b) => a.brandName.localeCompare(b.brandName));
   }, [medications, medSearchTerm]);
 
   // --- Enhanced Deep Search for Settings ---
@@ -566,7 +586,13 @@ const App: React.FC = () => {
         return medications.filter(m => {
           const isLowStock = m.stock <= m.reorderLevel;
           const searchableString = [
-            m.brandName, m.scientificName, m.companyName, m.category, m.type, m.strength, m.unit,
+            m.brandName,
+            m.scientificName,
+            m.companyName,
+            m.category,
+            m.type,
+            m.strength,
+            m.unit,
             m.pricePerUnit.toString(), isLowStock ? 'low stock' : 'in stock'
           ].join(' ').toLowerCase();
           return searchableString.includes(s);
@@ -641,6 +667,7 @@ const App: React.FC = () => {
     setPharmacySales(prev => [...prev, newSale]);
     setCart([]);
     setWalkinName('Walk-in Customer');
+    setShowPharmacyCartMobile(false);
     alert("Sale completed!");
   };
 
@@ -657,8 +684,14 @@ const App: React.FC = () => {
 
     const vitals: Record<string, string> = {};
     vitalDefinitions.forEach(v => {
-      const val = f.get(`vital_${v.id}`) as string;
-      if (val) vitals[v.id] = val;
+      if (v.label.toUpperCase() === 'B.P') {
+        const sys = f.get(`vital_${v.id}_sys`) as string;
+        const dia = f.get(`vital_${v.id}_dia`) as string;
+        if (sys || dia) vitals[v.id] = `${sys || ''}/${dia || ''}`;
+      } else {
+        const val = f.get(`vital_${v.id}`) as string;
+        if (val) vitals[v.id] = val;
+      }
     });
 
     const finalPrescribedMeds = tempPrescribedMeds
@@ -1095,6 +1128,13 @@ const App: React.FC = () => {
     setShowAllergyDropdown(false);
   };
 
+  const cartTotal = useMemo(() => {
+    return cart.reduce((sum, item) => {
+      const med = medications.find(m => m.id === item.medicationId);
+      return sum + (item.quantity * (med?.pricePerUnit || 0));
+    }, 0);
+  }, [cart, medications]);
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -1380,10 +1420,23 @@ const App: React.FC = () => {
                        
                        <div className="mt-4 flex flex-col gap-1.5">
                          {lastVisit ? (
-                           <div className="flex items-center gap-2 text-slate-500">
-                             <Calendar size={12} className="text-blue-400" />
-                             <p className="text-[10px] md:text-[11px] font-bold">Last Visit: <span className="text-slate-700">{formatDate(lastVisit.date)}</span></p>
-                           </div>
+                           <>
+                             <div className="flex items-center gap-2 text-slate-500">
+                               <Calendar size={12} className="text-blue-400" />
+                               <p className="text-[10px] md:text-[11px] font-bold">Last Visit: <span className="text-slate-700">{formatDate(lastVisit.date)}</span></p>
+                             </div>
+                             {lastVisit.vitals && Object.keys(lastVisit.vitals).length > 0 && (
+                               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                                 <Activity size={10} className="text-emerald-500 shrink-0" />
+                                 <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-tighter">
+                                   {vitalDefinitions
+                                     .map(vd => lastVisit.vitals![vd.id] ? `${vd.label}: ${lastVisit.vitals![vd.id]}${vd.unit}` : null)
+                                     .filter(Boolean)
+                                     .join(' • ')}
+                                 </p>
+                               </div>
+                             )}
+                           </>
                          ) : (
                            <p className="text-[10px] md:text-[11px] text-slate-300 italic font-medium">No visits recorded yet</p>
                          )}
@@ -1651,63 +1704,199 @@ const App: React.FC = () => {
            )}
 
            {view === 'pharmacy' && (
-             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 animate-in fade-in">
-               <div className="lg:col-span-2 space-y-6">
-                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                   <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Pharmacy</h1>
-                   <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
-                    <div className="flex gap-1 shrink-0">
-                       <button onClick={exportMedsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button>
-                       <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label>
-                    </div>
-                    <div className="relative flex-grow sm:w-64 group">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-                      <input type="text" placeholder="Deep Search: Brand, Salt, Company, Cat, Price, Stock..." value={medSearchTerm} onChange={(e) => setMedSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
-                      {medSearchTerm && <button onClick={() => setMedSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
-                    </div>
+             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8 animate-in fade-in h-full md:h-auto">
+               {/* Pharmacy POS Main Container - Toggleable for Mobile */}
+               <div className={`lg:col-span-2 flex flex-col gap-6 h-full ${showPharmacyCartMobile ? 'hidden lg:flex' : 'flex'}`}>
+                 <div className="flex flex-col gap-4 bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] shadow-sm border border-slate-100">
+                   <div className="flex justify-between items-center">
+                     <h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3"><ShoppingCart className="text-blue-600" size={32} /> Pharmacy POS</h1>
+                     <div className="flex gap-2">
+                       <button onClick={exportMedsCsv} className="p-3 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-2xl transition-all" title="Export Inventory"><FileDown size={20} /></button>
+                     </div>
+                   </div>
+                   
+                   <div className="relative group">
+                     <div className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none">
+                       <Search size={24} />
+                     </div>
+                     <input 
+                       ref={posSearchRef}
+                       type="text" 
+                       placeholder="DEEP SEARCH: Brand, Formula, Company, Category, Price... (Press '/' to focus)" 
+                       value={medSearchTerm} 
+                       onChange={(e) => setMedSearchTerm(e.target.value)} 
+                       className="w-full pl-14 pr-6 py-5 rounded-2xl md:rounded-3xl border-4 border-slate-50 bg-slate-50 focus:bg-white focus:border-blue-500/20 focus:ring-8 focus:ring-blue-500/5 outline-none font-black text-lg transition-all shadow-inner" 
+                     />
+                     {medSearchTerm && (
+                       <button onClick={() => setMedSearchTerm('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors">
+                         <X size={20}/>
+                       </button>
+                     )}
                    </div>
                  </div>
-                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                   {filteredMeds.map(med => {
-                     const isLowStock = med.stock <= med.reorderLevel;
-                     return (
-                      <div key={med.id} className={`bg-white p-5 rounded-3xl border-2 transition-all flex flex-col justify-between shadow-sm ${isLowStock ? 'border-amber-200' : 'border-white hover:border-blue-500'}`}>
-                        <div>
-                           <div className="flex justify-between items-start gap-2"><h3 className="text-lg font-black text-slate-800 leading-tight">{med.brandName}</h3>{isLowStock && (<span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1 shrink-0"><AlertTriangle size={10} /> Low</span>)}</div>
-                           <p className="text-slate-400 text-[10px] font-bold uppercase leading-tight mb-3 mt-1">{med.scientificName} • {med.strength}<br/>{med.companyName} • {med.type}</p>
-                           <div className="text-[10px] font-black uppercase tracking-tight flex justify-between items-center"><span className={isLowStock ? 'text-amber-600' : 'text-slate-500'}>Stock: {med.stock} {med.unit}</span> <span className="text-emerald-600 text-base">{CURRENCY} {med.pricePerUnit}</span></div>
-                        </div>
-                        <div className="mt-4 pt-4 border-t flex items-center justify-end">
-                          <button disabled={med.stock <= 0} onClick={() => addToCart(med.id)} className="bg-blue-600 text-white p-2.5 rounded-xl disabled:bg-slate-200 transition-all active:scale-90"><Plus size={20} /></button>
-                        </div>
-                      </div>
-                     );
-                   })}
+
+                 <div className="flex-grow bg-white rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col min-h-[300px]">
+                   <div className="p-6 border-b border-slate-50 flex justify-between items-center bg-slate-50/50">
+                     <h2 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><Zap size={14} className="text-amber-500" /> Search Results</h2>
+                     <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-3 py-1 rounded-full">{filteredMeds.length} Items Found</span>
+                   </div>
+                   
+                   <div className="overflow-y-auto flex-grow custom-scrollbar">
+                     <table className="w-full text-left min-w-[500px]">
+                       <thead className="sticky top-0 bg-white shadow-sm text-[10px] font-black uppercase tracking-widest text-slate-400 z-10">
+                         <tr>
+                           <th className="px-6 py-4">Medicine Info</th>
+                           <th className="px-6 py-4">Stock</th>
+                           <th className="px-6 py-4">Price</th>
+                           <th className="px-6 py-4 text-right">Action</th>
+                         </tr>
+                       </thead>
+                       <tbody className="divide-y divide-slate-50">
+                         {filteredMeds.map(med => {
+                           const isLowStock = med.stock <= med.reorderLevel;
+                           const isInCart = cart.some(item => item.medicationId === med.id);
+                           return (
+                            <tr key={med.id} className={`group hover:bg-blue-50/30 transition-colors ${isLowStock ? 'bg-amber-50/10' : ''}`}>
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col">
+                                  <span className="font-black text-slate-800 text-sm md:text-base leading-tight">{med.brandName}</span>
+                                  <span className="text-[10px] font-bold text-slate-400 uppercase leading-tight mt-0.5">
+                                    {med.scientificName} • {med.companyName}
+                                  </span>
+                                  <div className="flex gap-1 mt-1.5">
+                                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[8px] font-black rounded uppercase">{med.category}</span>
+                                    <span className="px-1.5 py-0.5 bg-slate-100 text-slate-500 text-[8px] font-black rounded uppercase">{med.type}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col">
+                                  <span className={`font-black text-xs ${isLowStock ? 'text-rose-500' : 'text-slate-600'}`}>{med.stock} {med.unit}</span>
+                                  {isLowStock && <span className="text-[8px] font-black text-rose-400 uppercase animate-pulse">Low Stock</span>}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className="font-black text-emerald-600">{CURRENCY} {med.pricePerUnit}</span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <button 
+                                  disabled={med.stock <= 0} 
+                                  onClick={() => addToCart(med.id)} 
+                                  className={`p-3 rounded-2xl transition-all active:scale-90 shadow-sm ${
+                                    isInCart 
+                                      ? 'bg-emerald-500 text-white shadow-emerald-100' 
+                                      : 'bg-blue-600 text-white shadow-blue-100 hover:bg-blue-700'
+                                  } disabled:bg-slate-200 disabled:shadow-none`}
+                                >
+                                  {isInCart ? <ListPlus size={20} /> : <Plus size={20} />}
+                                </button>
+                              </td>
+                            </tr>
+                           );
+                         })}
+                         {filteredMeds.length === 0 && (
+                           <tr>
+                             <td colSpan={4} className="py-20 text-center">
+                               <PackageSearch size={48} className="mx-auto text-slate-100 mb-4" />
+                               <p className="text-slate-300 font-black uppercase text-xs">No matching medicines found in inventory</p>
+                             </td>
+                           </tr>
+                         )}
+                       </tbody>
+                     </table>
+                   </div>
                  </div>
                </div>
                
-               <div className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] shadow-xl border-4 border-white h-fit lg:sticky lg:top-12 space-y-6 md:space-y-8">
-                  <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><ShoppingCart className="text-blue-600" size={24} /> Checkout</h2>
-                  <div className="space-y-3 max-h-60 md:max-h-96 overflow-y-auto pr-1 custom-scrollbar">
-                    {cart.length === 0 ? <p className="text-center py-8 text-slate-300 font-bold text-sm uppercase">Cart is empty</p> : 
-                    cart.map(item => {
+               {/* Mobile Floating Cart Button */}
+               {!showPharmacyCartMobile && cart.length > 0 && (
+                 <button 
+                  onClick={() => setShowPharmacyCartMobile(true)}
+                  className="lg:hidden fixed bottom-20 right-6 bg-blue-600 text-white p-4 rounded-3xl shadow-2xl z-[60] flex items-center gap-3 animate-bounce shadow-blue-200 border-4 border-white"
+                 >
+                   <div className="relative">
+                    <ShoppingCart size={24} />
+                    <span className="absolute -top-3 -right-3 bg-rose-500 text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">{cart.length}</span>
+                   </div>
+                   <div className="flex flex-col items-start leading-none">
+                     <span className="text-[10px] font-black uppercase opacity-70">Checkout</span>
+                     <span className="text-sm font-black">{CURRENCY} {cartTotal.toLocaleString()}</span>
+                   </div>
+                   <ChevronRight size={20} />
+                 </button>
+               )}
+               
+               {/* POS Receipt Sidebar (Mobile/Desktop) */}
+               <div className={`bg-white p-6 md:p-10 rounded-3xl md:rounded-[3rem] shadow-2xl border-4 border-white lg:sticky lg:top-12 flex flex-col gap-6 md:gap-8 overflow-hidden h-full ${showPharmacyCartMobile ? 'flex fixed inset-x-0 bottom-0 top-0 z-[100] rounded-none sm:relative sm:inset-auto sm:z-auto' : 'hidden lg:flex'}`}>
+                  <div className="flex justify-between items-center shrink-0">
+                    <div className="flex items-center gap-3">
+                      {showPharmacyCartMobile && (
+                        <button onClick={() => setShowPharmacyCartMobile(false)} className="lg:hidden p-2 bg-slate-50 rounded-xl text-slate-500"><ArrowLeft size={20}/></button>
+                      )}
+                      <h2 className="text-xl md:text-2xl font-black flex items-center gap-3"><Receipt className="text-blue-600" size={28} /> Receipt</h2>
+                    </div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-50 px-3 py-1 rounded-full">Items: {cart.length}</span>
+                  </div>
+
+                  <div className="space-y-3 shrink-0">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Customer Name</label>
+                    <input 
+                      type="text" 
+                      value={walkinName} 
+                      onChange={(e) => setWalkinName(e.target.value)} 
+                      placeholder="Walk-in Customer" 
+                      className="w-full p-4 rounded-2xl border-2 border-slate-50 bg-slate-50 font-black text-sm outline-none focus:bg-white focus:border-blue-500/20 transition-all" 
+                    />
+                  </div>
+
+                  <div className="flex-grow space-y-3 overflow-y-auto pr-1 custom-scrollbar min-h-[150px]">
+                    {cart.length === 0 ? (
+                      <div className="h-full flex flex-col items-center justify-center text-slate-300 gap-3 opacity-50">
+                        <ShoppingCart size={48} />
+                        <p className="font-black text-xs uppercase">Scan or Search to start</p>
+                      </div>
+                    ) : cart.map(item => {
                       const med = medications.find(m => m.id === item.medicationId)!;
                       return (
-                        <div key={item.medicationId} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
-                          <div className="flex-grow min-w-0 pr-2"><p className="font-black text-slate-800 text-xs truncate">{med.brandName}</p><p className="text-[9px] text-slate-400 uppercase">{CURRENCY} {med.pricePerUnit} × {item.quantity}</p></div>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => updateCartQty(item.medicationId, -1)} className="p-1 border rounded bg-white text-slate-400"><Minus size={12}/></button>
-                            <span className="font-black text-xs min-w-[1.5rem] text-center">{item.quantity}</span>
-                            <button onClick={() => updateCartQty(item.medicationId, 1)} className="p-1 border rounded bg-white text-slate-400"><Plus size={12}/></button>
-                            <button onClick={() => removeFromCart(item.medicationId)} className="text-rose-400 ml-1"><Trash2 size={14}/></button>
+                        <div key={item.medicationId} className="flex flex-col p-4 bg-blue-50/50 rounded-2xl border border-blue-100/50 group animate-in slide-in-from-right-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-grow min-w-0">
+                              <p className="font-black text-slate-800 text-sm truncate">{med.brandName} ({med.scientificName}) - {med.type}</p>
+                              <p className="text-[9px] text-slate-400 uppercase font-bold">{CURRENCY} {med.pricePerUnit} per {med.unit}</p>
+                            </div>
+                            <button onClick={() => removeFromCart(item.medicationId)} className="text-slate-300 hover:text-rose-500 transition-colors opacity-100 sm:opacity-0 sm:group-hover:opacity-100">
+                              <Trash2 size={16}/>
+                            </button>
+                          </div>
+                          
+                          <div className="flex items-center justify-between mt-3 pt-3 border-t border-blue-100/50">
+                            <div className="flex items-center bg-white rounded-xl border border-blue-100 p-1">
+                              <button onClick={() => updateCartQty(item.medicationId, -1)} className="p-1.5 hover:bg-slate-50 text-slate-400 transition-colors rounded-lg"><Minus size={14}/></button>
+                              <span className="font-black text-xs min-w-[2.5rem] text-center">{item.quantity}</span>
+                              <button onClick={() => updateCartQty(item.medicationId, 1)} className="p-1.5 hover:bg-slate-50 text-slate-400 transition-colors rounded-lg"><Plus size={14}/></button>
+                            </div>
+                            <span className="font-black text-sm text-blue-600">{CURRENCY} {(med.pricePerUnit * item.quantity).toLocaleString()}</span>
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="border-t pt-5">
-                    <div className="flex justify-between items-center mb-4"><span className="text-slate-400 font-black uppercase text-[10px]">Total</span><span className="text-2xl font-black text-blue-600">{CURRENCY} {cart.reduce((sum, item) => sum + (item.quantity * medications.find(m => m.id === item.medicationId)!.pricePerUnit), 0).toLocaleString()}</span></div>
-                    <button onClick={completeSale} disabled={cart.length === 0} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest shadow-xl disabled:opacity-20 active:scale-95 transition-all text-sm">Place Order</button>
+
+                  <div className="border-t-4 border-dashed border-slate-100 pt-6 mt-auto shrink-0">
+                    <div className="flex justify-between items-center mb-6">
+                      <span className="text-slate-400 font-black uppercase text-[10px] tracking-[0.2em]">Grand Total</span>
+                      <div className="text-right">
+                        <span className="text-3xl font-black text-blue-600 block leading-none">{CURRENCY} {cartTotal.toLocaleString()}</span>
+                        <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-1">Inclusive of all taxes</span>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={completeSale} 
+                      disabled={cart.length === 0} 
+                      className="w-full bg-blue-600 text-white py-5 rounded-[2rem] font-black uppercase tracking-widest shadow-2xl shadow-blue-200 disabled:opacity-20 active:scale-95 transition-all text-base flex items-center justify-center gap-3 mb-20 sm:mb-0"
+                    >
+                      <CheckCircle2 size={24} /> Complete & Pay
+                    </button>
                   </div>
                </div>
              </div>
@@ -2221,7 +2410,50 @@ const App: React.FC = () => {
 
                 <div className="space-y-4">
                   <h3 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Activity size={14} className="text-emerald-500" /> Vitals Markers</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">{vitalDefinitions.map(v => (<div key={v.id} className="relative"><input type="text" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span></div>))}</div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
+                    {vitalDefinitions.map(v => {
+                      if (v.label.toUpperCase() === 'B.P') {
+                        const bpValue = editingVisit?.vitals?.[v.id] || "";
+                        const [sys, dia] = bpValue.split('/');
+                        return (
+                          <div key={v.id} className="relative col-span-1 md:col-span-2">
+                            <div className="flex items-center gap-1 bg-white border-2 border-slate-100 rounded-xl px-2 focus-within:border-emerald-500 transition-all">
+                              <input type="text" name={`vital_${v.id}_sys`} defaultValue={sys} placeholder="Sys" className="w-full py-3 font-black text-center outline-none text-xs bg-transparent" />
+                              <span className="text-slate-300 font-black">/</span>
+                              <input type="text" name={`vital_${v.id}_dia`} defaultValue={dia} placeholder="Dia" className="w-full py-3 font-black text-center outline-none text-xs bg-transparent" />
+                              <span className="text-[9px] font-black text-slate-300 uppercase ml-1 pr-1">{v.unit}</span>
+                            </div>
+                            <div className="absolute -top-2 left-3 bg-white px-1 rounded text-[8px] font-black text-slate-400 uppercase">B.P</div>
+                          </div>
+                        );
+                      }
+                      // Specialized input for Temp with range validation (98 to 105)
+                      if (v.label.toUpperCase() === 'TEMP') {
+                        return (
+                          <div key={v.id} className="relative">
+                            <input 
+                              type="number" 
+                              step="0.1"
+                              min="98"
+                              max="105"
+                              name={`vital_${v.id}`} 
+                              defaultValue={editingVisit?.vitals?.[v.id]} 
+                              placeholder={v.label} 
+                              className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs shadow-sm bg-white" 
+                            />
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span>
+                            <div className="absolute -top-2 left-3 bg-white px-1 rounded text-[8px] font-black text-emerald-500 uppercase tracking-tighter">98-105 range</div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={v.id} className="relative">
+                          <input type="text" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs" />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
                 
                 <div className="bg-indigo-50/40 p-5 rounded-[2rem] border-2 border-indigo-100/50 space-y-4">
@@ -2451,9 +2683,11 @@ const App: React.FC = () => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
           const medDetails = printingVisit.prescribedMeds.map(pm => {
             const med = medications.find(m => m.id === pm.medicationId);
-            const name = med ? med.brandName : (pm.customName || 'Unknown');
-            const duration = pm.duration ? ` (Dur: ${pm.duration})` : '';
-            return `${name}${duration}`;
+            const brand = med ? med.brandName : (pm.customName || 'Unknown');
+            const formula = med ? ` (${med.scientificName})` : '';
+            const type = med ? ` - ${med.type}` : '';
+            const duration = pm.duration ? ` [Dur: ${pm.duration}]` : '';
+            return `${brand}${formula}${type}${duration}`;
           }).join(', ');
           return (
             <div className="w-full p-4 space-y-4 text-[13px]">
