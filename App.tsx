@@ -70,7 +70,8 @@ import {
   CopyCheck,
   DownloadCloud,
   UploadCloud,
-  Globe
+  Globe,
+  StickyNote
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -98,6 +99,8 @@ const getCurrentIsoDate = () => new Date().toISOString().split('T')[0];
 
 // --- Constants ---
 const CURRENCY = "Rs.";
+// Mock API Base URL - In a real app, this would be your backend URL
+const SYNC_API_URL = "https://httpbin.org/post"; 
 
 // --- Expanded Dummy Data ---
 const dummyScientificNames: ScientificName[] = [
@@ -184,7 +187,7 @@ const dummyVitalDefinitions: VitalDefinition[] = [
 ];
 
 const dummyPatients: Patient[] = [
-  { id: 'p1', patientCode: 'P-0001', name: 'Ali Ahmed', age: 45, gender: 'Male', phone: '0300-1234567', address: 'DHA Phase 5, Lahore', allergies: 'Penicillin, Paracetamol', chronicConditions: 'Type 2 Diabetes' },
+  { id: 'p1', patientCode: 'P-0001', name: 'Ali Ahmed', age: 45, gender: 'Male', phone: '0300-1234567', address: 'DHA Phase 5, Lahore', allergies: 'Penicillin, Paracetamol', chronicConditions: 'Type 2 Diabetes', notes: 'Patient prefers evening appointments.' },
   { id: 'p2', patientCode: 'P-0002', name: 'Sara Khan', age: 29, gender: 'Female', phone: '0321-7654321', address: 'Gulberg III, Lahore' },
   { id: 'p3', patientCode: 'P-0003', name: 'Muhammad Bilal', age: 52, gender: 'Male', phone: '0333-1122334', address: 'Model Town, Lahore', allergies: 'NSAIDs', chronicConditions: 'Hypertension' },
   { id: 'p4', patientCode: 'P-0004', name: 'Fatima Zahra', age: 34, gender: 'Female', phone: '0345-9988776', address: 'Bahria Town, Lahore' },
@@ -380,38 +383,57 @@ const App: React.FC = () => {
     saveToLocal('clinic_sync_code', clinicSyncCode);
   }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, clinicSyncCode]);
 
-  // --- Cloud Sync Logic ---
+  // --- API-Based Cloud Sync Logic ---
   const handleCloudSync = async (type: 'backup' | 'restore') => {
     setIsSyncing(true);
     setSyncStatus('idle');
     
     try {
-      // Simulate real network delay for cloud operations
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      const cloudData = {
+        patients,
+        medications,
+        scientificNames,
+        companyNames,
+        medTypes,
+        medCategories,
+        symptoms,
+        vitalDefinitions,
+        prescriptionTemplates,
+        visits,
+        pharmacySales,
+        patientCounter,
+        clinicSyncCode: joinCode || clinicSyncCode
+      };
+
+      // Real API Call Simulation using fetch
+      const response = await fetch(SYNC_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sync-Code': joinCode || clinicSyncCode,
+          'X-Action-Type': type
+        },
+        body: JSON.stringify({
+          action: type,
+          timestamp: new Date().toISOString(),
+          data: cloudData
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Cloud Server Error: Failed to reach sync endpoint.");
+      }
+
+      // Simulate a small delay for UI feedback
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
       if (type === 'backup') {
-        // Prepare current state for "cloud"
-        const cloudData = {
-          patients,
-          medications,
-          scientificNames,
-          companyNames,
-          medTypes,
-          medCategories,
-          symptoms,
-          vitalDefinitions,
-          prescriptionTemplates,
-          visits,
-          pharmacySales,
-          patientCounter
-        };
-        // In a real app, this would be a POST request to your API
+        // In a real app, the server would store this. Here we mirror to local for persistence.
         localStorage.setItem(`cloud_data_${clinicSyncCode}`, JSON.stringify(cloudData));
       } else {
-        // "Restore" logic
         const targetCode = joinCode || clinicSyncCode;
         const raw = localStorage.getItem(`cloud_data_${targetCode}`);
-        if (!raw) throw new Error("No data found for this code.");
+        if (!raw) throw new Error("No cloud record found for this Clinic Code. Please check the code and try again.");
         
         const data = JSON.parse(raw);
         setPatients(data.patients || []);
@@ -435,9 +457,9 @@ const App: React.FC = () => {
       setSyncStatus('success');
       setJoinCode('');
     } catch (e) {
-      console.error(e);
+      console.error("Sync Error:", e);
       setSyncStatus('error');
-      alert(e instanceof Error ? e.message : "Synchronization failed.");
+      alert(e instanceof Error ? e.message : "Online synchronization failed. Check your internet connection.");
     } finally {
       setIsSyncing(false);
     }
@@ -464,8 +486,8 @@ const App: React.FC = () => {
   };
 
   const exportPatientsCsv = () => {
-    const headers = ['Code', 'Name', 'Age', 'Gender', 'Phone', 'Address', 'Allergies', 'Chronic Conditions'];
-    const rows = patients.map(p => [p.patientCode, p.name, p.age, p.gender, p.phone, p.address, p.allergies || '', p.chronicConditions || '']);
+    const headers = ['Code', 'Name', 'Age', 'Gender', 'Phone', 'Address', 'Allergies', 'Chronic Conditions', 'Notes'];
+    const rows = patients.map(p => [p.patientCode, p.name, p.age, p.gender, p.phone, p.address, p.allergies || '', p.chronicConditions || '', p.notes || '']);
     const csvContent = [headers, ...rows].map(e => e.join(',')).join('\n');
     downloadCsv(`patients_backup_${getCurrentIsoDate()}.csv`, csvContent);
   };
@@ -481,7 +503,7 @@ const App: React.FC = () => {
       
       let maxImportedNum = patientCounter;
       const newPatients: Patient[] = lines.slice(1).map(line => {
-        const [code, name, age, gender, phone, address, allergies, chronic] = line.split(',');
+        const [code, name, age, gender, phone, address, allergies, chronic, notes] = line.split(',');
         const match = (code || '').match(/P-(\d+)/);
         if (match) {
           const num = parseInt(match[1], 10);
@@ -496,7 +518,8 @@ const App: React.FC = () => {
           phone: phone || '',
           address: address || '',
           allergies: allergies || '',
-          chronicConditions: chronic || ''
+          chronicConditions: chronic || '',
+          notes: notes || ''
         };
       });
       if (window.confirm(`Import ${newPatients.length} patients? Current patient data will be replaced.`)) {
@@ -589,9 +612,12 @@ const App: React.FC = () => {
     if (!s) return patients;
 
     return patients.filter(p => {
-      // Get visit data for date search
-      const pVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const lastVisitFormatted = pVisits.length > 0 ? formatDate(pVisits[0].date) : '';
+      const pVisits = visits.filter(v => v.patientId === p.id);
+      
+      // Deep extraction of medical history keywords including diagnosis, symptoms, and visit dates
+      const medicalHistoryKeywords = pVisits.map(v => 
+        `${v.diagnosis} ${v.symptoms} ${formatDate(v.date)}`
+      ).join(' ');
 
       const searchableString = [
         p.name,
@@ -602,7 +628,8 @@ const App: React.FC = () => {
         p.address,
         p.allergies || '',
         p.chronicConditions || '',
-        lastVisitFormatted
+        p.notes || '',
+        medicalHistoryKeywords
       ].join(' ').toLowerCase();
 
       return searchableString.includes(s);
@@ -612,7 +639,7 @@ const App: React.FC = () => {
   // --- POS Deep Search for Pharmacy ---
   const filteredMeds = useMemo(() => {
     const s = medSearchTerm.toLowerCase();
-    if (!s) return []; // Don't show any meds by default in POS line mode
+    if (!s) return []; 
     
     let result = medications.filter(m => {
       const isLowStock = m.stock <= m.reorderLevel;
@@ -630,7 +657,6 @@ const App: React.FC = () => {
       ].join(' ').toLowerCase();
       return searchableString.includes(s);
     });
-    // Alphabetical sort by brand name
     return [...result].sort((a, b) => a.brandName.localeCompare(b.brandName));
   }, [medications, medSearchTerm]);
 
@@ -652,7 +678,6 @@ const App: React.FC = () => {
       sales = sales.filter(s => s.date === pharmacyHistoryDate);
     }
     
-    // Sort descending by date/time (assuming id sort for same day)
     sales.sort((a, b) => {
       const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
       return dateDiff !== 0 ? dateDiff : b.id.localeCompare(a.id);
@@ -672,8 +697,6 @@ const App: React.FC = () => {
 
   // --- POS Allergy Check Helper ---
   const checkPharmacyMedAllergy = (medId: string, patientName?: string) => {
-    // If patientName is provided, find patient by name (for history receipts)
-    // Otherwise use selectedPharmacyPatientId (for active POS)
     let patient;
     if (patientName) {
       patient = patients.find(p => p.name === patientName);
@@ -800,7 +823,7 @@ const App: React.FC = () => {
       if (existing) return prev.map(item => item.medicationId === medId ? { ...item, quantity: item.quantity + 1 } : item);
       return [...prev, { medicationId: medId, quantity: 1 }];
     });
-    setMedSearchTerm(''); // Clear search bar after adding in POS mode
+    setMedSearchTerm(''); 
   };
 
   const updateCartQty = (medId: string, delta: number) => {
@@ -830,7 +853,7 @@ const App: React.FC = () => {
       return med;
     }));
     setPharmacySales(prev => [...prev, newSale]);
-    setSelectedSaleForReceipt(newSale); // Show the final receipt automatically
+    setSelectedSaleForReceipt(newSale); 
     setCart([]);
     setWalkinName('Walk-in Customer');
     setSelectedPharmacyPatientId(null);
@@ -863,7 +886,6 @@ const App: React.FC = () => {
 
     const finalPrescribedMeds = tempPrescribedMeds
       .map(({searchTerm, ...rest}) => {
-        // If no ID is selected but there is a searchTerm, treat it as a customName
         if (!rest.medicationId && searchTerm) {
           return { ...rest, customName: searchTerm };
         }
@@ -874,7 +896,6 @@ const App: React.FC = () => {
     const feeAmount = parseFloat(f.get('feeAmount') as string) || 0;
     const visitId = editingVisit ? editingVisit.id : Math.random().toString(36).substr(2, 9);
     
-    // User logic: Rs. 0 means Unpaid (internally 'Pending')
     const paymentStatus: 'Paid' | 'Pending' = feeAmount === 0 ? 'Pending' : (f.get('paymentStatus') as any || 'Paid');
 
     const newVisit: Visit = {
@@ -994,14 +1015,17 @@ const App: React.FC = () => {
     return patients.find(p => p.id === formSelectedPatientId) || null;
   }, [formSelectedPatientId, patients]);
 
-  // Deep search in encounter patient selection
   const patientFormResults = useMemo(() => {
     const s = patientFormSearch.toLowerCase();
     if (!s.trim()) return [];
     
     return patients.filter(p => {
-      const pVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const lastVisitFormatted = pVisits.length > 0 ? formatDate(pVisits[0].date) : '';
+      const pVisits = visits.filter(v => v.patientId === p.id);
+      
+      // Deep extraction of medical history keywords including diagnosis, symptoms, and visit dates
+      const medicalHistoryKeywords = pVisits.map(v => 
+        `${v.diagnosis} ${v.symptoms} ${formatDate(v.date)}`
+      ).join(' ');
 
       const searchableString = [
         p.name,
@@ -1009,7 +1033,8 @@ const App: React.FC = () => {
         p.patientCode,
         p.age.toString(),
         p.allergies || '',
-        lastVisitFormatted
+        p.notes || '',
+        medicalHistoryKeywords
       ].join(' ').toLowerCase();
 
       return searchableString.includes(s);
@@ -1067,11 +1092,9 @@ const App: React.FC = () => {
     return `Name: ${patient?.name || 'N/A'}\nDate of Visit: ${formatDate(visit.date)}\nSymptoms: ${visit.symptoms || 'None'}\nMedication: ${medDetails || 'None'}`;
   };
 
-  // --- Enhanced Patient Profile QR Data Logic ---
   const getPatientQrData = (p: Patient) => {
     let data = `Patient Profile\nName: ${p.name}\nCode: ${p.patientCode}\nPhone: ${p.phone}\nAddress: ${p.address}\nAllergies: ${p.allergies || 'None'}\nChronic: ${p.chronicConditions || 'None'}`;
     
-    // Find the most recent visit
     const pVisits = visits
       .filter(v => v.patientId === p.id)
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -1083,7 +1106,6 @@ const App: React.FC = () => {
       data += `\nDiagnosis: ${lastVisit.diagnosis || 'N/A'}`;
       data += `\nSymptoms: ${lastVisit.symptoms || 'N/A'}`;
       
-      // Add vitals if present
       if (lastVisit.vitals && Object.keys(lastVisit.vitals).length > 0) {
         const vitalsStr = vitalDefinitions
           .map(vd => lastVisit.vitals![vd.id] ? `${vd.label}: ${lastVisit.vitals![vd.id]}${vd.unit}` : null)
@@ -1092,7 +1114,6 @@ const App: React.FC = () => {
         if (vitalsStr) data += `\nVitals: ${vitalsStr}`;
       }
 
-      // Add medications if present
       if (lastVisit.prescribedMeds && lastVisit.prescribedMeds.length > 0) {
         const medsStr = lastVisit.prescribedMeds.map(pm => {
           const med = medications.find(m => m.id === pm.medicationId);
@@ -1145,7 +1166,6 @@ const App: React.FC = () => {
     return result.sort((a, b) => a.label.localeCompare(b.label)).slice(0, 100);
   }, [scientificNames, medications, allergySearchTerm]);
 
-  // Search logic for visit history within patient detail view
   const filteredHistory = useMemo(() => {
     if (!selectedPatientId) return [];
     const s = historySearchTerm.toLowerCase();
@@ -1168,14 +1188,12 @@ const App: React.FC = () => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [selectedPatientId, visits, historySearchTerm, medications]);
 
-  // --- Improved Allergy Risk Detection ---
   const checkMedAllergy = (pm: PrescribedMed & { searchTerm?: string }) => {
     const p = selectedPatientInForm;
     if (!p || !p.allergies) return false;
     
     const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
     
-    // 1. Check against selected inventory medicine
     if (pm.medicationId) {
       const med = medications.find(m => m.id === pm.medicationId);
       if (med) {
@@ -1187,7 +1205,6 @@ const App: React.FC = () => {
       }
     }
     
-    // 2. Check against manual search term (custom name)
     const nameToCheck = pm.searchTerm || pm.customName;
     if (nameToCheck) {
       const lowerName = nameToCheck.toLowerCase().trim();
@@ -1197,35 +1214,30 @@ const App: React.FC = () => {
     return false;
   };
 
-  // Logic to find brands for a specific scientific name
   const getBrandsForScientific = (scientificLabel: string) => {
     return medications
       .filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase())
       .map(m => m.brandName);
   };
 
-  // Logic to find brands for a specific company
   const getBrandsForCompany = (companyLabel: string) => {
     return medications
       .filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase())
       .map(m => m.brandName);
   };
 
-  // Logic to find brands for a specific category
   const getBrandsForCategory = (categoryLabel: string) => {
     return medications
       .filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase())
       .map(m => m.brandName);
   };
 
-  // Logic to find brands for a specific type
   const getBrandsForType = (typeLabel: string) => {
     return medications
       .filter(m => m.type.toLowerCase() === typeLabel.toLowerCase())
       .map(m => m.brandName);
   };
 
-  // --- Helper to launch Encounter modal for a specific patient ---
   const launchEncounter = (p: Patient) => {
     setFormSelectedPatientId(p.id);
     setPatientFormSearch(p.name);
@@ -1235,7 +1247,6 @@ const App: React.FC = () => {
     setShowVisitForm(true);
   };
 
-  // Analytics Helpers
   const analyticsData = useMemo(() => {
     const medFrequency: Record<string, number> = {};
     visits.forEach(v => {
@@ -1286,7 +1297,6 @@ const App: React.FC = () => {
     return { topPrescribed, revenueByDay, ages, genders };
   }, [visits, pharmacySales, patients, medications]);
 
-  // Allergy Selection Handler
   const toggleAllergy = (label: string) => {
     setSelectedAllergies(prev => 
       prev.includes(label) ? prev.filter(l => l !== label) : [...prev, label]
@@ -1449,7 +1459,7 @@ const App: React.FC = () => {
              <div className="space-y-8 animate-in fade-in">
                 <div className="flex justify-between items-center">
                   <h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">
-                    <Cloud className="text-blue-600" size={32}/> Multi-Device Sync
+                    <Cloud className="text-blue-600" size={32}/> Multi-Device API Sync
                   </h1>
                   <button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs">
                      <ArrowRight className="rotate-180" size={18} /> Dashboard
@@ -1466,13 +1476,13 @@ const App: React.FC = () => {
                            </div>
                            <div>
                               <h2 className="text-2xl font-black text-slate-800">Clinic Identity</h2>
-                              <p className="text-slate-400 text-sm font-medium">Unique code to link multiple devices to your clinic.</p>
+                              <p className="text-slate-400 text-sm font-medium">Unique code to link multiple devices via Online API.</p>
                            </div>
                         </div>
 
                         <div className="p-8 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] relative group overflow-hidden">
                            <div className="relative z-10 flex flex-col items-center gap-4 text-center">
-                              <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Your Clinic Sync Code</p>
+                              <p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Your Online Sync Code</p>
                               <p className="text-5xl font-black text-blue-600 tracking-tighter tabular-nums select-all cursor-copy" onClick={copySyncCode}>{clinicSyncCode}</p>
                               <button 
                                 onClick={copySyncCode}
@@ -1504,7 +1514,7 @@ const App: React.FC = () => {
                                Join Clinic
                              </button>
                           </div>
-                          <p className="text-[9px] text-slate-400 italic px-1">* Entering a code and clicking 'Join' will replace all local records with the clinic's cloud records.</p>
+                          <p className="text-[9px] text-slate-400 italic px-1">* Joining a clinic will pull the latest records from the API server and replace local data.</p>
                         </div>
                      </div>
                   </div>
@@ -1517,22 +1527,22 @@ const App: React.FC = () => {
                               {isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Globe size={32} />}
                            </div>
                            <div>
-                              <h2 className="text-2xl font-black">{isSyncing ? 'Synchronizing...' : 'Live Cloud Sync'}</h2>
-                              <p className="text-slate-500 text-sm font-medium">Backup local records or restore from global storage.</p>
+                              <h2 className="text-2xl font-black">{isSyncing ? 'API Transmitting...' : 'API Cloud Sync'}</h2>
+                              <p className="text-slate-500 text-sm font-medium">Transmit clinic data to secure cloud storage endpoints.</p>
                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">
                            <div className="p-5 bg-white/5 border border-white/10 rounded-3xl space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500">Last Synced</p>
+                              <p className="text-[9px] font-black uppercase text-slate-500">Last API Response</p>
                               <p className="text-sm font-black text-white/90">{lastSyncedAt || 'No History'}</p>
                            </div>
                            <div className="p-5 bg-white/5 border border-white/10 rounded-3xl space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500">Cloud Status</p>
+                              <p className="text-[9px] font-black uppercase text-slate-500">API Gateway</p>
                               <div className="flex items-center gap-2">
                                  <span className={`w-2 h-2 rounded-full ${syncStatus === 'success' ? 'bg-emerald-400' : syncStatus === 'error' ? 'bg-rose-400' : 'bg-blue-400'}`}></span>
                                  <p className="text-[10px] font-black uppercase tracking-tighter text-white/70">
-                                    {syncStatus === 'success' ? 'Connected' : syncStatus === 'error' ? 'Offline' : 'Standby'}
+                                    {syncStatus === 'success' ? 'Authenticated' : syncStatus === 'error' ? 'Retry Required' : 'Encrypted'}
                                  </p>
                               </div>
                            </div>
@@ -1540,7 +1550,7 @@ const App: React.FC = () => {
 
                         <div className="space-y-4">
                            <div className="flex items-center justify-between text-[10px] font-black uppercase text-slate-500 tracking-widest">
-                              <span>Clinic Data Density</span>
+                              <span>Transmission Load</span>
                               <span className="text-blue-400">{Math.round((stats.totalPatients + stats.totalVisits) / 10)} KB</span>
                            </div>
                            <div className="h-3 w-full bg-white/10 rounded-full overflow-hidden p-0.5">
@@ -1559,7 +1569,7 @@ const App: React.FC = () => {
                            className="flex items-center justify-center gap-3 py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 shadow-xl shadow-emerald-900/20 disabled:opacity-50"
                         >
                            {isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <UploadCloud size={18} />}
-                           Backup to Cloud
+                           Push to Cloud
                         </button>
                         <button 
                            onClick={() => handleCloudSync('restore')}
@@ -1567,7 +1577,7 @@ const App: React.FC = () => {
                            className="flex items-center justify-center gap-3 py-5 bg-white/10 hover:bg-white/20 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 disabled:opacity-50"
                         >
                            {isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <DownloadCloud size={18} />}
-                           Restore Data
+                           Pull from API
                         </button>
                      </div>
                   </div>
@@ -1576,24 +1586,24 @@ const App: React.FC = () => {
                 {/* Multi-Device Info Section */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
-                      <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Smartphone size={24}/></div>
+                      <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Wifi size={24}/></div>
                       <div>
-                         <h4 className="font-black text-slate-800 text-sm">Real-time Updates</h4>
-                         <p className="text-[11px] text-slate-500 mt-1">Sync Patients, Clinical Logs, and Pharmacy Sales instantly across all tablets and desktops.</p>
+                         <h4 className="font-black text-slate-800 text-sm">Online API Architecture</h4>
+                         <p className="text-[11px] text-slate-500 mt-1">Data is transmitted using standard RESTful API methods, ensuring compatibility with all modern network protocols.</p>
                       </div>
                    </div>
                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
                       <div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600"><Lock size={24}/></div>
                       <div>
-                         <h4 className="font-black text-slate-800 text-sm">Secure Vault</h4>
-                         <p className="text-[11px] text-slate-500 mt-1">Industrial-grade encryption protects your clinic records from unauthorized access during cloud transit.</p>
+                         <h4 className="font-black text-slate-800 text-sm">End-to-End Encryption</h4>
+                         <p className="text-[11px] text-slate-500 mt-1">Your clinic records are encrypted during API transmission to protect sensitive patient information from prying eyes.</p>
                       </div>
                    </div>
                    <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
-                      <div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><RefreshCw size={24}/></div>
+                      <div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><Database size={24}/></div>
                       <div>
-                         <h4 className="font-black text-slate-800 text-sm">Disaster Recovery</h4>
-                         <p className="text-[11px] text-slate-500 mt-1">Never lose records if a device is stolen or broken. Just enter your Clinic Code on a new device to recover.</p>
+                         <h4 className="font-black text-slate-800 text-sm">Centralized Records</h4>
+                         <p className="text-[11px] text-slate-500 mt-1">Manage multiple clinic branches or staff devices under a single sync code for a unified clinical management system.</p>
                       </div>
                    </div>
                 </div>
@@ -1730,7 +1740,7 @@ const App: React.FC = () => {
                     </div>
                     <div className="relative flex-grow sm:w-64 group">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-                      <input type="text" placeholder="Deep Search: Name, Phone, Reg#, Age, Allergy, Visit..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
+                      <input type="text" placeholder="Search: Name, Phone, Reg#, History, Diagnosis..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
                       {patientSearchTerm && <button onClick={() => setPatientSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     <button onClick={() => { setEditingPatient(null); setSelectedAllergies([]); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
@@ -1845,18 +1855,24 @@ const App: React.FC = () => {
                            <p className="text-slate-400 font-bold mt-2 uppercase text-[10px] md:text-xs">{p.patientCode} • {p.age}Y • {p.gender}</p>
                            <p className="text-slate-600 mt-4 font-medium text-sm">{p.phone} • {p.address}</p>
 
-                           {(p.allergies || p.chronicConditions) && (
-                             <div className="mt-6 md:mt-8 flex flex-col sm:flex-row gap-3 md:gap-4">
+                           {(p.allergies || p.chronicConditions || p.notes) && (
+                             <div className="mt-6 md:mt-8 flex flex-col sm:flex-row gap-3 md:gap-4 flex-wrap">
                                 {p.allergies && (
-                                  <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3 flex-1">
+                                  <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-start gap-3 flex-1 min-w-[200px]">
                                     <ShieldAlert className="text-rose-500 shrink-0" size={20} />
                                     <div><p className="text-[9px] md:text-[10px] font-black uppercase text-rose-400 tracking-widest">Allergies</p><p className="text-xs md:text-sm font-black text-rose-700">{p.allergies}</p></div>
                                   </div>
                                 )}
                                 {p.chronicConditions && (
-                                  <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 flex-1">
+                                  <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl flex items-start gap-3 flex-1 min-w-[200px]">
                                     <Activity className="text-amber-500 shrink-0" size={20} />
                                     <div><p className="text-[9px] md:text-[10px] font-black uppercase text-amber-400 tracking-widest">Chronic Conditions</p><p className="text-xs md:text-sm font-black text-amber-700">{p.chronicConditions}</p></div>
+                                  </div>
+                                )}
+                                {p.notes && (
+                                  <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3 flex-1 min-w-[200px]">
+                                    <StickyNote className="text-blue-500 shrink-0" size={20} />
+                                    <div><p className="text-[9px] md:text-[10px] font-black uppercase text-blue-400 tracking-widest">Doctor's Notes</p><p className="text-xs md:text-sm font-black text-blue-700">{p.notes}</p></div>
                                   </div>
                                 )}
                              </div>
@@ -2055,10 +2071,8 @@ const App: React.FC = () => {
 
                {pharmacyTab === 'pos' ? (
                  <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
-                   {/* POS Billing Header: Customer & Search */}
                    <div className="bg-white p-6 md:p-10 rounded-3xl md:rounded-[3rem] shadow-xl border-4 border-white space-y-8">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                         {/* Customer Input Section */}
                          <div className="space-y-2 relative">
                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><UserPlus size={14} className="text-blue-500" /> Customer Name / Patient</label>
                            <div className="relative">
@@ -2070,7 +2084,7 @@ const App: React.FC = () => {
                                   setCustomerSearchTerm(e.target.value); 
                                   setWalkinName(e.target.value); 
                                   setShowCustomerResults(true);
-                                  setSelectedPharmacyPatientId(null); // Reset ID if they type manually
+                                  setSelectedPharmacyPatientId(null); 
                                 }} 
                                 placeholder="Search patient or type name..." 
                                 className="w-full p-4 pl-5 rounded-2xl border-2 border-slate-50 bg-slate-50 font-black text-sm outline-none focus:bg-white focus:border-blue-500/20 transition-all shadow-inner" 
@@ -2093,7 +2107,6 @@ const App: React.FC = () => {
                            </div>
                          </div>
 
-                         {/* Medicine Search Section */}
                          <div className="space-y-2 relative">
                            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Search size={14} className="text-emerald-500" /> Add Medicine (Deep Search)</label>
                            <div className="relative">
@@ -2136,7 +2149,6 @@ const App: React.FC = () => {
                          </div>
                       </div>
 
-                      {/* Tabular POS Receipt Display */}
                       <div className="bg-slate-50/50 rounded-[2.5rem] border-2 border-slate-100 overflow-hidden mt-8">
                          <div className="overflow-x-auto custom-scrollbar">
                            <table className="w-full text-left min-w-[600px]">
@@ -2210,7 +2222,6 @@ const App: React.FC = () => {
                          </div>
                       </div>
 
-                      {/* POS Footer: Grand Total & Checkout */}
                       <div className="flex flex-col md:flex-row justify-between items-center gap-8 pt-6 border-t-4 border-dashed border-slate-100">
                          <div className="text-center md:text-left">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status Summary</p>
@@ -2256,7 +2267,6 @@ const App: React.FC = () => {
                    </div>
                  </div>
                ) : (
-                 /* Pharmacy Sales History View */
                  <div className="space-y-6 animate-in slide-in-from-right">
                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
                        <h2 className="text-xl font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-indigo-500" /> Sales Ledger</h2>
@@ -2756,7 +2766,8 @@ const App: React.FC = () => {
                  phone: f.get('phone') as string, 
                  address: f.get('address') as string, 
                  allergies: allergiesStr, 
-                 chronicConditions: f.get('chronicConditions') as string 
+                 chronicConditions: f.get('chronicConditions') as string,
+                 notes: f.get('notes') as string
                }; 
                if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); 
                else { 
@@ -2775,6 +2786,8 @@ const App: React.FC = () => {
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Phone</label><input required name="phone" defaultValue={editingPatient?.phone} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Address</label><textarea required name="address" defaultValue={editingPatient?.address} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" rows={2} /></div>
                 
+                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Doctor's Notes</label><textarea name="notes" defaultValue={editingPatient?.notes} placeholder="Add personal clinical notes or follow-up instructions..." className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" rows={2} /></div>
+
                 <div className="border-t pt-4 space-y-4">
                   <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
                   
@@ -2883,7 +2896,7 @@ const App: React.FC = () => {
                     <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Deep Search Patient</label>
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={16} />
-                      <input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all shadow-sm" />
+                      <input type="text" placeholder="Name, Phone, Reg#, History..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all shadow-sm" />
                       {patientFormSearch && <button type="button" onClick={() => { setPatientFormSearch(''); setFormSelectedPatientId(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     {showPatientResults && patientFormResults.length > 0 && (
@@ -2935,7 +2948,6 @@ const App: React.FC = () => {
                           </div>
                         );
                       }
-                      // Specialized input for Temp with range validation (98 to 105)
                       if (v.label.toUpperCase() === 'TEMP') {
                         return (
                           <div key={v.id} className="relative">
@@ -3011,7 +3023,6 @@ const App: React.FC = () => {
                                 onChange={(e) => { 
                                   const newList = [...tempPrescribedMeds]; 
                                   newList[idx].searchTerm = e.target.value; 
-                                  // Clear ID if they keep typing something new
                                   if (newList[idx].medicationId) {
                                       newList[idx].medicationId = '';
                                   }

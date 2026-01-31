@@ -97,6 +97,7 @@ export interface Patient {
   address: string;
   allergies?: string;
   chronicConditions?: string;
+  notes?: string;
 }
 
 export interface ScheduleDay {
