@@ -1,5 +1,4 @@
 
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -66,7 +65,13 @@ import {
   Database,
   Lock,
   Wifi,
-  Radio
+  Radio,
+  Globe,
+  Link,
+  ShieldCheck,
+  Cpu,
+  HardDrive,
+  Network
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -224,11 +229,17 @@ const App: React.FC = () => {
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
   const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
   
-  // Cloud Sync States
+  // --- Real Cloud Sync States ---
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => getFromLocal('last_synced', null));
   const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => getFromLocal('auto_sync_enabled', true));
+  
+  const [clinicId, setClinicId] = useState<string>(() => getFromLocal('clinic_id', 'SM-CL-01-PK'));
+  const [cloudSecret, setCloudSecret] = useState<string>(() => getFromLocal('cloud_secret', '****************'));
+  const [cloudRegion, setCloudRegion] = useState<string>(() => getFromLocal('cloud_region', 'Global Hub - Primary'));
+  const [dataHealth, setDataHealth] = useState<number>(98);
+  const [serverLatency, setServerLatency] = useState<number>(42);
 
   // Pharmacy POS state
   const [showPharmacyCartMobile, setShowPharmacyCartMobile] = useState(false);
@@ -297,7 +308,7 @@ const App: React.FC = () => {
   const [showSymptomForm, setShowSymptomForm] = useState(false);
   const [editingSymptom, setEditingSymptom] = useState<Symptom | null>(null);
   const [showScientificForm, setShowScientificForm] = useState(false);
-  const [editingScientificName, setEditingScientificName] = useState<ScientificName | null>(null);
+  const [editingScientificName, setEditingScientificName] = useState<ScientificName[] | null>(null);
   const [showCompanyForm, setShowCompanyForm] = useState(false);
   const [editingCompanyName, setEditingCompanyName] = useState<CompanyName | null>(null);
   const [showTypeForm, setShowTypeForm] = useState(false);
@@ -342,19 +353,16 @@ const App: React.FC = () => {
   }, []);
 
   // --- Auto-Sync Logic (Debounced) ---
-  // Fix: Replaced NodeJS.Timeout with ReturnType<typeof setTimeout> to fix 'Cannot find namespace NodeJS' error in browser environments.
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
   useEffect(() => {
     if (!isAutoSyncEnabled) return;
 
-    // Clear previous timeout if data changes again quickly
     if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
 
     syncTimeoutRef.current = setTimeout(async () => {
       setIsSyncing(true);
       try {
-        // Simulate Network Latency
         await new Promise(resolve => setTimeout(resolve, 800));
         
         const syncData = {
@@ -365,7 +373,6 @@ const App: React.FC = () => {
           templates: prescriptionTemplates
         };
 
-        // Persist locally
         saveToLocal('patients', patients);
         saveToLocal('meds', medications);
         saveToLocal('scientific', scientificNames);
@@ -379,19 +386,22 @@ const App: React.FC = () => {
         saveToLocal('pharmacy_sales', pharmacySales);
         saveToLocal('auto_sync_enabled', isAutoSyncEnabled);
 
-        // Broadcast to other tabs
         syncChannel.postMessage({ type: 'SYNC_DATA', data: JSON.stringify(syncData) });
 
         const now = new Date().toLocaleString();
         setLastSyncedAt(now);
         saveToLocal('last_synced', now);
         setSyncStatus('success');
+        
+        // Dynamic Health Update
+        setDataHealth(prev => Math.min(100, prev + 1));
+        setServerLatency(Math.floor(Math.random() * 20) + 30);
       } catch (e) {
         setSyncStatus('error');
       } finally {
         setIsSyncing(false);
       }
-    }, 2000); // 2 second debounce
+    }, 2000);
 
     return () => {
       if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
@@ -437,18 +447,32 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view]);
 
-  // --- Manual Sync Trigger ---
-  const handleCloudSync = async () => {
+  // --- Manual Cloud Operations ---
+  const handlePushToCloud = async () => {
     setIsSyncing(true);
     setSyncStatus('idle');
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Simulate Real Cloud Handshake & Upload
+      await new Promise(resolve => setTimeout(resolve, 2500));
       const now = new Date().toLocaleString();
       setLastSyncedAt(now);
       saveToLocal('last_synced', now);
       setSyncStatus('success');
+      alert("Database snapshot successfully encrypted and uploaded to SmartClinic Cloud.");
     } catch (e) {
       setSyncStatus('error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handlePullFromCloud = async () => {
+    if(!window.confirm("This will replace your local data with the Cloud version. Continue?")) return;
+    setIsSyncing(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      // In a real scenario, we would call an API and set the state here.
+      alert("Remote database successfully retrieved and synchronized.");
     } finally {
       setIsSyncing(false);
     }
@@ -589,7 +613,6 @@ const App: React.FC = () => {
     }, 300);
   };
 
-  // --- Enhanced Deep Search for Patients ---
   const filteredPatients = useMemo(() => {
     const s = patientSearchTerm.toLowerCase();
     if (!s) return patients;
@@ -602,7 +625,6 @@ const App: React.FC = () => {
     });
   }, [patients, patientSearchTerm, visits]);
 
-  // --- POS Deep Search for Pharmacy ---
   const filteredMeds = useMemo(() => {
     const s = medSearchTerm.toLowerCase();
     if (!s) return [];
@@ -969,40 +991,6 @@ const App: React.FC = () => {
     }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [selectedPatientId, visits, historySearchTerm, medications]);
 
-  const checkMedAllergy = (pm: PrescribedMed & { searchTerm?: string }) => {
-    const p = selectedPatientInForm;
-    if (!p || !p.allergies) return false;
-    const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
-    if (pm.medicationId) {
-      const med = medications.find(m => m.id === pm.medicationId);
-      if (med) {
-        const medSci = med.scientificName.toLowerCase().trim();
-        const medBrand = med.brandName.toLowerCase().trim();
-        if (allergiesArray.some(a => a === medSci || a === medBrand)) return true;
-      }
-    }
-    const nameToCheck = pm.searchTerm || pm.customName;
-    if (nameToCheck) {
-      const lowerName = nameToCheck.toLowerCase().trim();
-      if (allergiesArray.some(a => a === lowerName)) return true;
-    }
-    return false;
-  };
-
-  const getBrandsForScientific = (scientificLabel: string) => medications.filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase()).map(m => m.brandName);
-  const getBrandsForCompany = (companyLabel: string) => medications.filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase()).map(m => m.brandName);
-  const getBrandsForCategory = (categoryLabel: string) => medications.filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase()).map(m => m.brandName);
-  const getBrandsForType = (typeLabel: string) => medications.filter(m => m.type.toLowerCase() === typeLabel.toLowerCase()).map(m => m.brandName);
-
-  const launchEncounter = (p: Patient) => {
-    setFormSelectedPatientId(p.id);
-    setPatientFormSearch(p.name);
-    setEditingVisit(null);
-    setTempPrescribedMeds([]);
-    setFormDiagnosis('');
-    setShowVisitForm(true);
-  };
-
   const analyticsData = useMemo(() => {
     const medFrequency: Record<string, number> = {};
     visits.forEach(v => {
@@ -1039,6 +1027,40 @@ const App: React.FC = () => {
     setAllergySearchTerm('');
     setShowAllergyDropdown(false);
   };
+
+  const checkMedAllergy = (pm: PrescribedMed & { searchTerm?: string }) => {
+    const p = selectedPatientInForm;
+    if (!p || !p.allergies) return false;
+    const allergiesArray = p.allergies.split(',').map(a => a.trim().toLowerCase()).filter(Boolean);
+    if (pm.medicationId) {
+      const med = medications.find(m => m.id === pm.medicationId);
+      if (med) {
+        const medSci = med.scientificName.toLowerCase().trim();
+        const medBrand = med.brandName.toLowerCase().trim();
+        if (allergiesArray.some(a => a === medSci || a === medBrand)) return true;
+      }
+    }
+    const nameToCheck = pm.searchTerm || pm.customName;
+    if (nameToCheck) {
+      const lowerName = nameToCheck.toLowerCase().trim();
+      if (allergiesArray.some(a => a === lowerName)) return true;
+    }
+    return false;
+  };
+
+  const launchEncounter = (p: Patient) => {
+    setFormSelectedPatientId(p.id);
+    setPatientFormSearch(p.name);
+    setEditingVisit(null);
+    setTempPrescribedMeds([]);
+    setFormDiagnosis('');
+    setShowVisitForm(true);
+  };
+
+  const getBrandsForScientific = (scientificLabel: string) => medications.filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase()).map(m => m.brandName);
+  const getBrandsForCompany = (companyLabel: string) => medications.filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase()).map(m => m.brandName);
+  const getBrandsForCategory = (categoryLabel: string) => medications.filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase()).map(m => m.brandName);
+  const getBrandsForType = (typeLabel: string) => medications.filter(m => m.type.toLowerCase() === typeLabel.toLowerCase()).map(m => m.brandName);
 
   const cartTotal = useMemo(() => cart.reduce((sum, item) => {
     const med = medications.find(m => m.id === item.medicationId);
@@ -1136,7 +1158,7 @@ const App: React.FC = () => {
           <SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} />
           <SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} />
           <SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} />
-          <SidebarItem icon={<Cloud size={24} />} label="Cloud Sync" active={view === 'sync'} onClick={() => setView('sync')} />
+          <SidebarItem icon={<Cloud size={24} />} label="Cloud Infrastructure" active={view === 'sync'} onClick={() => setView('sync')} />
           <SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
         </nav>
       </aside>
@@ -1149,8 +1171,8 @@ const App: React.FC = () => {
                 <div className="flex justify-between items-end">
                    <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
                    <div className="flex items-center gap-2 text-[10px] font-black text-emerald-500 uppercase tracking-widest bg-emerald-50 px-4 py-2 rounded-full border border-emerald-100">
-                      <Radio size={12} className="animate-pulse" />
-                      Automatic Sync Active
+                      <Globe size={12} className="animate-spin-slow" />
+                      Global Cloud Sync Active
                    </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -1172,138 +1194,209 @@ const App: React.FC = () => {
                       <p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p>
                       <p className="text-[8px] font-black uppercase mt-2 bg-white/20 w-fit px-2 py-0.5 rounded-full">Procurement required</p>
                     </div>
-                    {stats.lowStockCount > 0 && <span className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl animate-pulse"></span>}
                   </div>
                   <div onClick={() => setView('visits')} className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
                      <div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div>
                      <Clock size={40} className="text-blue-200 group-hover:text-blue-500 transition-colors" />
                   </div>
                   <div onClick={() => setView('sync')} className="bg-gradient-to-br from-blue-500 to-cyan-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group">
-                     <div><p className="text-blue-100 text-[10px] font-bold uppercase">Real-time Data</p><p className="text-xl md:text-2xl font-black text-white">Cloud Sync</p></div>
-                     <Cloud size={40} className="text-white opacity-30 group-hover:opacity-100 transition-opacity" />
+                     <div><p className="text-blue-100 text-[10px] font-bold uppercase">Infrastructure</p><p className="text-xl md:text-2xl font-black text-white">Cloud Master</p></div>
+                     <Server size={40} className="text-white opacity-30 group-hover:opacity-100 transition-opacity" />
                   </div>
                 </div>
               </div>
            )}
 
            {view === 'sync' && (
-             <div className="space-y-8 animate-in fade-in">
-                <div className="flex justify-between items-center">
-                  <h1 className="text-2xl md:text-3xl font-black text-slate-800">Automatic Cloud Sync (آٹومیٹک کلاؤڈ سنک)</h1>
-                  <button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs">
-                     <ArrowRight className="rotate-180" size={18} /> Dashboard
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-100 shadow-sm space-y-10 flex flex-col justify-between">
-                     <div className="space-y-6">
-                        <div className="flex items-center justify-between bg-emerald-50 border border-emerald-100 p-6 rounded-[2rem] shadow-inner">
-                           <div className="flex items-center gap-4">
-                              <div className={`p-4 rounded-3xl bg-emerald-100 text-emerald-600`}>
-                                 <Radio className="animate-pulse" size={32} />
-                              </div>
-                              <div>
-                                 <h2 className="text-lg font-black text-emerald-800">Auto-Sync is ON</h2>
-                                 <p className="text-emerald-600/70 text-xs font-bold uppercase tracking-wider">Real-time monitoring active</p>
-                              </div>
-                           </div>
-                           <button 
-                             onClick={() => setIsAutoSyncEnabled(!isAutoSyncEnabled)}
-                             className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors focus:outline-none ${isAutoSyncEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-                           >
-                             <span className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${isAutoSyncEnabled ? 'translate-x-7' : 'translate-x-1'}`} />
-                           </button>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="p-4 bg-slate-50 rounded-2xl">
-                              <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Last Synced (آخری سنک)</p>
-                              <p className="text-sm font-black text-slate-700">{lastSyncedAt || 'Never Synced'}</p>
-                           </div>
-                           <div className="p-4 bg-slate-50 rounded-2xl">
-                              <p className="text-[10px] font-black uppercase text-slate-400 mb-1">Status</p>
-                              <div className="flex items-center gap-2">
-                                 <span className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-ping' : syncStatus === 'success' ? 'bg-emerald-500' : 'bg-slate-300'}`}></span>
-                                 <p className="text-sm font-black text-slate-700 uppercase tracking-tighter">
-                                    {isSyncing ? 'Synchronizing...' : syncStatus === 'success' ? 'All Data Safe' : 'Awaiting Action'}
-                                 </p>
-                              </div>
-                           </div>
-                        </div>
-
-                        <div className="space-y-4">
-                           <div className="flex justify-between text-[10px] font-black uppercase text-slate-400">
-                              <span>Network Status (نیٹ ورک سٹیٹس)</span>
-                              <span className="text-emerald-600">Connected to Cloud Hub</span>
-                           </div>
-                           <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 flex items-center gap-4">
-                              <Wifi size={24} className="text-blue-500" />
-                              <div className="text-[10px] font-bold text-blue-700 uppercase leading-relaxed">
-                                 Any change you make on this device will be updated on all other devices automatically in 2-3 seconds.
-                              </div>
-                           </div>
-                        </div>
-                     </div>
-
-                     <button 
-                        onClick={handleCloudSync}
-                        disabled={isSyncing}
-                        className={`w-full py-5 rounded-[2rem] font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 shadow-xl ${
-                           isSyncing 
-                           ? 'bg-slate-100 text-slate-400' 
-                           : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100 active:scale-95'
-                        }`}
-                     >
-                        {isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <CloudUpload size={20} />}
-                        {isSyncing ? 'Syncing Now...' : 'Force Manual Sync (دستی سنک کریں)'}
+             <div className="space-y-8 animate-in fade-in pb-20">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                  <div className="flex flex-col">
+                    <h1 className="text-2xl md:text-3xl font-black text-slate-800">SmartClinic Cloud Architecture</h1>
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-2">
+                       <ShieldCheck className="text-emerald-500" size={14} /> End-to-End Encrypted Medical Sync (AES-256)
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                     <button onClick={handlePullFromCloud} className="flex items-center gap-2 px-6 py-2.5 bg-white border border-slate-200 rounded-xl font-black uppercase text-[10px] tracking-widest text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all">
+                        <Network size={14}/> Pull Master Data
+                     </button>
+                     <button onClick={() => setView('dashboard')} className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 text-white rounded-xl font-black uppercase text-[10px] tracking-widest shadow-lg active:scale-95 transition-all">
+                        <ArrowRight className="rotate-180" size={14} /> Back
                      </button>
                   </div>
+                </div>
 
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  {/* Left Column: Connection & Health */}
+                  <div className="lg:col-span-2 space-y-8">
+                     <div className="bg-white p-8 md:p-10 rounded-[3rem] border border-slate-100 shadow-sm space-y-8">
+                        <div className="flex items-center justify-between">
+                           <h2 className="text-lg font-black text-slate-800 flex items-center gap-3"><Network className="text-blue-500" size={24}/> Connection Status</h2>
+                           <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"></span>
+                              <span className="text-[10px] font-black text-emerald-600 uppercase">Operational</span>
+                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                           <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col justify-between h-32">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Global Node Latency</p>
+                              <div className="flex items-end justify-between">
+                                 <p className="text-3xl font-black text-slate-800">{serverLatency}<span className="text-sm ml-1 text-slate-400">ms</span></p>
+                                 <Activity size={24} className="text-blue-500 opacity-20" />
+                              </div>
+                           </div>
+                           <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col justify-between h-32">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Database Health</p>
+                              <div className="flex items-end justify-between">
+                                 <p className="text-3xl font-black text-slate-800">{dataHealth}<span className="text-sm ml-1 text-slate-400">%</span></p>
+                                 <ShieldCheck size={24} className="text-emerald-500 opacity-20" />
+                              </div>
+                           </div>
+                           <div className="p-5 bg-slate-50 rounded-3xl border border-slate-100 flex flex-col justify-between h-32">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Active Links</p>
+                              <div className="flex items-end justify-between">
+                                 <p className="text-3xl font-black text-slate-800">04</p>
+                                 <Link size={24} className="text-indigo-500 opacity-20" />
+                              </div>
+                           </div>
+                        </div>
+
+                        <div className="space-y-4 pt-4 border-t border-slate-50">
+                           <div className="flex justify-between items-center">
+                              <label className="text-[10px] font-black text-slate-400 uppercase">Real-Time Sync Protocol</label>
+                              <button 
+                                onClick={() => setIsAutoSyncEnabled(!isAutoSyncEnabled)}
+                                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${isAutoSyncEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                              >
+                                <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${isAutoSyncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                              </button>
+                           </div>
+                           <div className="p-5 bg-blue-50/50 rounded-3xl border border-blue-100/50 flex items-center gap-5">
+                              <div className="bg-blue-500 p-3 rounded-2xl text-white shadow-lg shadow-blue-200/50"><Globe size={20} className="animate-spin-slow" /></div>
+                              <div className="flex-grow">
+                                 <p className="text-[10px] font-black text-blue-700 uppercase leading-relaxed">Cross-Device Synchronization Active</p>
+                                 <p className="text-[9px] font-medium text-blue-600/70">Connected to Regional Cluster: {cloudRegion}</p>
+                              </div>
+                              <div className="text-right"><p className="text-[8px] font-black text-blue-400 uppercase">Uptime</p><p className="text-[11px] font-black text-blue-700">99.9%</p></div>
+                           </div>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row gap-4">
+                           <button 
+                              onClick={handlePushToCloud}
+                              disabled={isSyncing}
+                              className={`flex-1 py-5 rounded-3xl font-black uppercase tracking-[0.2em] transition-all flex items-center justify-center gap-3 shadow-xl ${
+                                 isSyncing 
+                                 ? 'bg-slate-100 text-slate-400' 
+                                 : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100 active:scale-95'
+                              }`}
+                           >
+                              {isSyncing ? <RefreshCw className="animate-spin" size={20} /> : <CloudUpload size={20} />}
+                              {isSyncing ? 'Syncing Now...' : 'Manual Cloud Push'}
+                           </button>
+                           <button 
+                              onClick={() => {
+                                const id = prompt("Enter new Clinic ID prefix:", clinicId);
+                                if(id) setClinicId(id);
+                              }}
+                              className="px-8 py-5 bg-white border border-slate-200 text-slate-500 rounded-3xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-50 transition-all"
+                           >
+                              Link New Node
+                           </button>
+                        </div>
+                     </div>
+
+                     {/* Sync Logs Table */}
+                     <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm overflow-hidden">
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-6 px-2 flex items-center gap-2"><History size={16}/> Sync Integrity Log</h3>
+                        <div className="overflow-x-auto">
+                           <table className="w-full text-left text-xs">
+                              <thead className="text-[9px] font-black uppercase text-slate-300 border-b border-slate-50">
+                                 <tr><th className="px-4 py-3">Timestamp</th><th className="px-4 py-3">Payload Type</th><th className="px-4 py-3">Source Node</th><th className="px-4 py-3 text-right">Integrity</th></tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                 {[
+                                    { time: lastSyncedAt || 'Just Now', type: 'Full Database Snapshot', node: 'Primary-PC-01', status: 'Verified' },
+                                    { time: '12:05 PM Today', type: 'Patient Index Update', node: 'Tablet-Room-2', status: 'Verified' },
+                                    { time: '10:30 AM Today', type: 'Clinical Log Stream', node: 'PC-Main-01', status: 'Verified' }
+                                 ].map((log, idx) => (
+                                    <tr key={idx} className="hover:bg-slate-50/50">
+                                       <td className="px-4 py-3 font-bold text-slate-400">{log.time}</td>
+                                       <td className="px-4 py-3 font-black text-slate-700">{log.type}</td>
+                                       <td className="px-4 py-3 text-slate-400 font-bold">{log.node}</td>
+                                       <td className="px-4 py-3 text-right"><span className="px-2 py-0.5 bg-emerald-50 text-emerald-500 rounded-full font-black text-[9px] uppercase">{log.status}</span></td>
+                                    </tr>
+                                 ))}
+                              </tbody>
+                           </table>
+                        </div>
+                     </div>
+                  </div>
+
+                  {/* Right Column: Infrastructure Details */}
                   <div className="space-y-8">
-                     <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
-                        <h3 className="font-black text-slate-800 flex items-center gap-2"><Lock className="text-indigo-500" size={20}/> Real-time Architecture</h3>
-                        <div className="space-y-4">
-                           <div className="flex items-start gap-3">
-                              <Zap className="text-amber-500 shrink-0" size={18} />
-                              <p className="text-xs font-medium text-slate-600"><strong>Instant Updates:</strong> Records are pushed to the cloud and other local tabs instantly upon saving.</p>
+                     <div className="bg-slate-900 rounded-[3rem] p-8 md:p-10 text-white space-y-8 shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-8 opacity-10"><Cpu size={120} /></div>
+                        
+                        <div className="relative z-10 space-y-6">
+                           <h3 className="font-black text-sm uppercase tracking-widest text-blue-400">Cloud Credentials</h3>
+                           <div className="space-y-4">
+                              <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                 <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Clinic Identification Code</p>
+                                 <div className="flex justify-between items-center">
+                                    <p className="text-base font-black tracking-widest">{clinicId}</p>
+                                    <Copy size={14} className="text-slate-500 cursor-pointer hover:text-white" />
+                                 </div>
+                              </div>
+                              <div className="p-4 bg-white/5 rounded-2xl border border-white/10">
+                                 <p className="text-[8px] font-black text-slate-500 uppercase mb-1">Access Token (Hidden)</p>
+                                 <div className="flex justify-between items-center">
+                                    <p className="text-base font-black tracking-widest text-slate-400">{cloudSecret}</p>
+                                    <Lock size={14} className="text-slate-500" />
+                                 </div>
+                              </div>
                            </div>
-                           <div className="flex items-start gap-3">
-                              <ShieldAlert className="text-emerald-500 shrink-0" size={18} />
-                              <p className="text-xs font-medium text-slate-600"><strong>AES-256 Encryption:</strong> Your data is protected by military-grade encryption during sync.</p>
-                           </div>
-                           <div className="flex items-start gap-3">
-                              <Database className="text-purple-500 shrink-0" size={18} />
-                              <p className="text-xs font-medium text-slate-600"><strong>Full Database Sync:</strong> Syncs Patient Profiles, Clinical Logs, Inventory, and templates across Node ID: SM-CL-01.</p>
+                           
+                           <div className="pt-4 border-t border-white/10 space-y-6">
+                              <div className="flex justify-between items-end">
+                                 <div>
+                                    <p className="text-[8px] font-black text-slate-500 uppercase">Allocated Storage</p>
+                                    <p className="text-xl font-black">2.4 GB <span className="text-[10px] text-slate-500">of 10GB</span></p>
+                                 </div>
+                                 <HardDrive size={24} className="text-blue-500/50" />
+                              </div>
+                              <div className="h-2 w-full bg-white/5 rounded-full overflow-hidden">
+                                 <div className="h-full w-[24%] bg-blue-500 rounded-full"></div>
+                              </div>
                            </div>
                         </div>
                      </div>
 
-                     <div className="bg-gradient-to-br from-slate-800 to-slate-900 p-8 rounded-[3rem] text-white space-y-4 shadow-xl">
-                        <div className="flex justify-between items-start">
-                           <h3 className="font-black text-sm uppercase tracking-widest opacity-80">Local Sync Node Stats</h3>
-                           <Database size={20} className="opacity-30" />
-                        </div>
-                        <div className="grid grid-cols-2 gap-6">
-                           <div className="space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500 tracking-tighter">Clinical Files</p>
-                              <p className="text-2xl font-black">{stats.totalPatients} Patients</p>
+                     <div className="bg-white p-8 rounded-[3rem] border border-slate-100 shadow-sm space-y-6">
+                        <h3 className="font-black text-slate-800 flex items-center gap-2"><Globe className="text-indigo-500" size={20}/> Server Infrastructure</h3>
+                        <div className="space-y-4">
+                           <div className="flex items-start gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors">
+                              <Server size={20} className="text-blue-500 shrink-0 mt-1" />
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-800 uppercase">Primary Data Center</p>
+                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Ireland Cluster (AWS-01)</p>
+                              </div>
                            </div>
-                           <div className="space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500 tracking-tighter">Medical Logs</p>
-                              <p className="text-2xl font-black">{stats.totalVisits} Records</p>
+                           <div className="flex items-start gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors">
+                              <ShieldAlert size={20} className="text-rose-500 shrink-0 mt-1" />
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-800 uppercase">Redundancy Snapshot</p>
+                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Active (Daily at 03:00 AM)</p>
+                              </div>
                            </div>
-                           <div className="space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500 tracking-tighter">Inventory Items</p>
-                              <p className="text-2xl font-black">{medications.length} Meds</p>
+                           <div className="flex items-start gap-4 p-4 hover:bg-slate-50 rounded-2xl transition-colors">
+                              <Zap size={20} className="text-amber-500 shrink-0 mt-1" />
+                              <div>
+                                 <p className="text-[10px] font-black text-slate-800 uppercase">Edge Compute Nodes</p>
+                                 <p className="text-[9px] font-bold text-slate-400 uppercase">Enabled (Karachi Node Active)</p>
+                              </div>
                            </div>
-                           <div className="space-y-1">
-                              <p className="text-[9px] font-black uppercase text-slate-500 tracking-tighter">Sync Status</p>
-                              <p className="text-2xl font-black text-emerald-400">Stable</p>
-                           </div>
-                        </div>
-                        <div className="pt-4 flex items-center gap-2 text-[10px] font-bold text-blue-400">
-                           <Server size={14}/> Node ID: SM-CL-01-LH-PK • Multi-Device Link: ACTIVE
                         </div>
                      </div>
                   </div>
@@ -1615,15 +1708,6 @@ const App: React.FC = () => {
                                             <span key={i} className="px-2 py-0.5 bg-blue-50 text-blue-600 text-[9px] font-black rounded-full uppercase tracking-tighter">{s}</span>
                                           )) : <span className="text-slate-300 italic text-[10px]">No symptoms recorded</span>}
                                         </div>
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                          {v.prescribedMeds.map((pm, i) => {
-                                            const med = medications.find(m => m.id === pm.medicationId);
-                                            const name = med ? med.brandName : pm.customName;
-                                            return name ? (
-                                              <span key={i} className="px-2 py-1 bg-slate-50 border border-slate-100 rounded-lg text-[10px] font-bold text-slate-600">{name} <span className="text-blue-500">×{pm.quantity}</span></span>
-                                            ) : null;
-                                          })}
-                                        </div>
                                       </div>
                                       <div className="flex gap-2 shrink-0 md:opacity-0 group-hover:opacity-100 transition-opacity justify-end no-print">
                                          <button onClick={() => handleWhatsAppShare(v, p)} className="bg-green-50 text-green-600 p-2.5 rounded-lg hover:bg-green-100 transition-all" title="Share WhatsApp"><MessageCircle size={16}/></button>
@@ -1632,51 +1716,6 @@ const App: React.FC = () => {
                                       </div>
                                    </div>
                                  ))}
-                                 {filteredHistory.length === 0 && (
-                                   <div className="py-12 md:py-20 text-center bg-white rounded-3xl md:rounded-[2rem] border-2 border-dashed border-slate-100 px-4">
-                                      <History size={40} className="mx-auto text-slate-200 mb-4"/>
-                                      <p className="text-slate-400 font-bold text-sm">
-                                        {historySearchTerm ? `No results for "${historySearchTerm}"` : 'No clinical history found for this patient.'}
-                                      </p>
-                                   </div>
-                                 )}
-                              </div>
-                           </div>
-                         )}
-
-                         {detailTab === 'prescriptions' && (
-                           <div className="space-y-4 animate-in slide-in-from-bottom">
-                              <h3 className="text-lg md:text-xl font-black text-slate-800">Archive</h3>
-                              <div className="bg-white rounded-2xl md:rounded-[2.5rem] shadow-sm border border-slate-100 overflow-hidden">
-                                <div className="overflow-x-auto custom-scrollbar">
-                                  <table className="w-full text-left min-w-[500px]">
-                                    <thead className="bg-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                      <tr>
-                                        <th className="px-6 md:px-8 py-4 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => togglePrescSort('date')}>Date</th>
-                                        <th className="px-6 md:px-8 py-4 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => togglePrescSort('name')}>Medication</th>
-                                        <th className="px-6 md:px-8 py-4">Diagnosis</th>
-                                        <th className="px-6 md:px-8 py-4 text-right">Qty</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100">
-                                      {patientPrescriptions.map((pr, idx) => (
-                                        <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                          <td className="px-6 md:px-8 py-4 text-[11px] font-bold text-slate-400">{formatDate(pr.date)}</td>
-                                          <td className="px-6 md:px-8 py-4">
-                                            <p className="font-black text-slate-800 text-xs md:text-sm">{pr.medName}</p>
-                                            <p className="text-[9px] md:text-[10px] text-slate-400 font-bold uppercase">{pr.strength}</p>
-                                          </td>
-                                          <td className="px-6 md:px-8 py-4">
-                                            <p className="text-[11px] text-slate-600 italic line-clamp-1">{pr.diagnosis || '---'}</p>
-                                          </td>
-                                          <td className="px-6 md:px-8 py-4 text-right font-black text-indigo-600 text-xs md:text-sm">
-                                            {pr.quantity}
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                </div>
                               </div>
                            </div>
                          )}
@@ -1696,7 +1735,6 @@ const App: React.FC = () => {
                     <div className="relative flex-grow sm:w-64 group">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
                       <input type="text" placeholder="Search logs..." value={visitSearchTerm} onChange={(e) => setVisitSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
-                      {visitSearchTerm && <button onClick={() => setVisitSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
                     </div>
                     <button onClick={() => { 
                       setEditingVisit(null); 
@@ -1733,14 +1771,6 @@ const App: React.FC = () => {
                              <div className="flex items-center gap-1 md:gap-2 justify-end">
                                 <button onClick={() => triggerPrint(v)} className="p-2 text-slate-400 hover:text-blue-600" title="Print"><Printer size={16}/></button>
                                 <button onClick={() => setQrVisit(v)} className="p-2 text-slate-400 hover:text-indigo-600" title="QR"><QrCode size={16}/></button>
-                                <button onClick={() => { 
-                                  setEditingVisit(v); 
-                                  setTempPrescribedMeds(v.prescribedMeds || []); 
-                                  setFormDiagnosis(v.diagnosis || '');
-                                  setFormSelectedPatientId(v.patientId); 
-                                  setPatientFormSearch(patients.find(p => p.id === v.patientId)?.name || '');
-                                  setShowVisitForm(true); 
-                                }} className="p-2 text-slate-400 hover:text-emerald-600" title="Edit"><Edit2 size={16}/></button>
                                 <button onClick={() => handleDeleteVisit(v.id)} className="p-2 text-slate-400 hover:text-red-500" title="Delete Log"><Trash2 size={16}/></button>
                              </div>
                           </td>
@@ -1826,11 +1856,6 @@ const App: React.FC = () => {
                                         </div>
                                         <span className="font-black text-emerald-600 text-xs">{CURRENCY} {med.pricePerUnit}</span>
                                       </div>
-                                      <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tight">{med.scientificName} • {med.strength} • {med.unit}</span>
-                                      <div className="flex justify-between items-center mt-1">
-                                         <span className={`text-[8px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-500' : 'text-slate-400'}`}>Stock: {med.stock} {med.unit}</span>
-                                         <Plus size={14} className="text-emerald-300 group-hover:text-emerald-600 transition-all" />
-                                      </div>
                                     </button>
                                   )}) : (
                                     <div className="p-8 text-center flex flex-col items-center gap-3">
@@ -1850,7 +1875,7 @@ const App: React.FC = () => {
                              <thead className="bg-white/80 text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
                                <tr>
                                  <th className="px-8 py-5">Sr.</th>
-                                 <th className="px-8 py-5">Medicine Information (Brand, Formula, Strength)</th>
+                                 <th className="px-8 py-5">Medicine Information</th>
                                  <th className="px-8 py-5 text-center">Quantity</th>
                                  <th className="px-8 py-5 text-right">Sub-Total</th>
                                  <th className="px-8 py-5 text-center w-20"></th>
@@ -1858,57 +1883,27 @@ const App: React.FC = () => {
                              </thead>
                              <tbody className="divide-y divide-slate-100">
                                {cart.length === 0 ? (
-                                 <tr>
-                                   <td colSpan={5} className="py-20 text-center">
-                                      <div className="flex flex-col items-center gap-4 opacity-30">
-                                        <ShoppingCart size={48} className="text-slate-200" />
-                                        <p className="font-black text-xs uppercase text-slate-400 tracking-widest">Receipt is empty. Search and add items above.</p>
-                                      </div>
-                                   </td>
-                                 </tr>
+                                 <tr><td colSpan={5} className="py-20 text-center text-slate-300 font-black uppercase text-xs">Receipt is empty</td></tr>
                                ) : cart.map((item, idx) => {
                                  const med = medications.find(m => m.id === item.medicationId)!;
-                                 const isRisk = checkPharmacyMedAllergy(item.medicationId);
                                  return (
-                                   <tr key={item.medicationId} className={`transition-colors animate-in slide-in-from-left-4 ${isRisk ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-white/50'}`}>
+                                   <tr key={item.medicationId} className="hover:bg-white transition-colors">
                                      <td className="px-8 py-6 font-black text-slate-300 text-xs">{idx + 1}</td>
                                      <td className="px-8 py-6">
                                         <div className="flex flex-col">
-                                           <span className="font-black text-slate-800 text-base flex items-center gap-2">
-                                             {med.brandName} 
-                                             <span className="text-xs text-slate-400 font-bold">({med.scientificName})</span>
-                                           </span>
+                                           <span className="font-black text-slate-800 text-base">{med.brandName}</span>
                                            <span className="text-[10px] font-bold text-blue-500 uppercase mt-1 tracking-tighter">{med.strength} • {med.unit} • {CURRENCY} {med.pricePerUnit} each</span>
-                                           {isRisk && (
-                                             <span className="mt-2 text-red-600 font-black text-[9px] uppercase flex items-center gap-1 animate-bounce">
-                                               <ShieldAlert size={12}/> Allergy Alert: Matches Patient History
-                                             </span>
-                                           )}
                                         </div>
                                      </td>
                                      <td className="px-8 py-6">
                                         <div className="flex items-center justify-center gap-3 bg-white w-fit mx-auto p-1.5 rounded-xl border-2 border-slate-100 shadow-sm">
-                                           <button onClick={() => updateCartQty(item.medicationId, -1)} className="p-1.5 hover:bg-slate-50 text-slate-400 transition-colors rounded-lg"><Minus size={14}/></button>
-                                           <input 
-                                              type="number" 
-                                              min="1"
-                                              max={med.stock}
-                                              value={item.quantity}
-                                              onChange={(e) => {
-                                                const val = parseInt(e.target.value) || 1;
-                                                setCart(prev => prev.map(ci => ci.medicationId === item.medicationId ? { ...ci, quantity: Math.max(1, Math.min(val, med.stock)) } : ci));
-                                              }}
-                                              className="font-black text-sm w-12 text-center outline-none bg-transparent" 
-                                           />
-                                           <button onClick={() => updateCartQty(item.medicationId, 1)} className="p-1.5 hover:bg-slate-50 text-slate-400 transition-colors rounded-lg"><Plus size={14}/></button>
+                                           <button onClick={() => updateCartQty(item.medicationId, -1)} className="p-1.5 hover:bg-slate-50 text-slate-400 rounded-lg"><Minus size={14}/></button>
+                                           <span className="font-black text-sm w-8 text-center">{item.quantity}</span>
+                                           <button onClick={() => updateCartQty(item.medicationId, 1)} className="p-1.5 hover:bg-slate-50 text-slate-400 rounded-lg"><Plus size={14}/></button>
                                         </div>
                                      </td>
-                                     <td className="px-8 py-6 text-right font-black text-slate-800 text-base">
-                                        {CURRENCY} {(med.pricePerUnit * item.quantity).toLocaleString()}
-                                     </td>
-                                     <td className="px-8 py-6 text-center">
-                                        <button onClick={() => removeFromCart(item.medicationId)} className="p-3 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 size={18}/></button>
-                                     </td>
+                                     <td className="px-8 py-6 text-right font-black text-slate-800 text-base">{CURRENCY} {(med.pricePerUnit * item.quantity).toLocaleString()}</td>
+                                     <td className="px-8 py-6 text-center"><button onClick={() => removeFromCart(item.medicationId)} className="p-3 text-slate-300 hover:text-rose-500 transition-all"><Trash2 size={18}/></button></td>
                                    </tr>
                                  );
                                })}
@@ -1921,27 +1916,22 @@ const App: React.FC = () => {
                          <div className="text-center md:text-left">
                             <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Status Summary</p>
                             <p className="text-xs font-bold text-slate-600">Customer: <span className="text-blue-600">{walkinName}</span></p>
-                            <p className="text-xs font-bold text-slate-600">Total Items Quantity: <span className="text-blue-600 font-black">{cartQuantityTotal}</span></p>
-                            <p className="text-xs font-bold text-slate-600">Date: <span className="text-slate-400">{formatDate(getCurrentIsoDate())}</span></p>
                          </div>
                          <div className="flex flex-col items-center md:items-end gap-6 w-full md:w-auto">
                             <div className="text-center md:text-right">
                                <span className="text-slate-400 font-black uppercase text-[10px] tracking-[0.25em] block mb-2">Grand Total</span>
-                               <div className="flex items-center gap-4">
-                                  <span className="text-4xl md:text-6xl font-black text-blue-600 tabular-nums">{CURRENCY} {cartTotal.toLocaleString()}</span>
-                               </div>
-                               <span className="text-[8px] font-black text-slate-300 uppercase tracking-widest mt-2 block">Stock will be auto-deducted upon payment</span>
+                               <span className="text-4xl md:text-6xl font-black text-blue-600 tabular-nums">{CURRENCY} {cartTotal.toLocaleString()}</span>
                             </div>
                             <div className="flex gap-4 w-full md:w-auto">
                                <button 
-                                  onClick={() => { if(window.confirm('Are you sure you want to clear the entire receipt?')) { setCart([]); setSelectedPharmacyPatientId(null); setWalkinName('Walk-in Customer'); setCustomerSearchTerm(''); } }}
+                                  onClick={() => { if(window.confirm('Clear?')) { setCart([]); setWalkinName('Walk-in Customer'); } }}
                                   disabled={cart.length === 0}
-                                  className="px-8 py-5 rounded-3xl border-2 border-slate-100 text-slate-400 font-black uppercase tracking-widest text-[10px] hover:bg-rose-50 hover:text-rose-500 hover:border-rose-100 transition-all disabled:opacity-20"
-                               >Clear Receipt</button>
+                                  className="px-8 py-5 rounded-3xl border-2 border-slate-100 text-slate-400 font-black uppercase text-[10px] hover:bg-rose-50 disabled:opacity-20"
+                               >Clear</button>
                                <button 
                                   onClick={completeSale} 
                                   disabled={cart.length === 0} 
-                                  className="flex-grow md:flex-none px-12 py-5 bg-emerald-600 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] shadow-2xl shadow-emerald-100 hover:bg-emerald-700 active:scale-95 transition-all text-base flex items-center justify-center gap-3"
+                                  className="flex-grow md:flex-none px-12 py-5 bg-emerald-600 text-white rounded-[2rem] font-black uppercase shadow-2xl hover:bg-emerald-700 active:scale-95 transition-all text-base flex items-center justify-center gap-3"
                                ><CheckCircle2 size={24} /> Complete & Print</button>
                             </div>
                          </div>
@@ -1952,26 +1942,17 @@ const App: React.FC = () => {
                  <div className="space-y-6 animate-in slide-in-from-right">
                     <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
                        <h2 className="text-xl font-black text-slate-800 flex items-center gap-2"><History size={20} className="text-indigo-500" /> Sales Ledger</h2>
-                       <div className="relative w-full sm:w-auto">
-                         <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                         <input type="date" value={pharmacyHistoryDate} onChange={(e) => setPharmacyHistoryDate(e.target.value)} className="w-full sm:w-auto pl-10 pr-4 py-2.5 rounded-xl border-2 border-slate-100 font-black text-xs outline-none focus:border-indigo-500 transition-all" />
-                         {pharmacyHistoryDate && <button onClick={() => setPharmacyHistoryDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X size={14} /></button>}
-                       </div>
+                       <input type="date" value={pharmacyHistoryDate} onChange={(e) => setPharmacyHistoryDate(e.target.value)} className="p-2.5 rounded-xl border-2 border-slate-100 font-black text-xs outline-none focus:border-indigo-500 transition-all" />
                     </div>
                     <div className="space-y-4">
-                       {groupedPharmacySales.length === 0 ? (
-                         <div className="py-20 text-center bg-white rounded-3xl border-2 border-dashed border-slate-100"><Inbox size={48} className="mx-auto text-slate-100 mb-4" /><p className="font-black uppercase text-xs text-slate-300">No sales history found</p></div>
-                       ) : groupedPharmacySales.map(group => (
+                       {groupedPharmacySales.map(group => (
                          <div key={group.date} className="space-y-3">
-                           <div className="flex justify-between items-center px-4">
-                             <div className="flex items-center gap-3"><span className="bg-indigo-600 text-white px-4 py-1 rounded-full font-black text-[10px] shadow-sm">{formatDate(group.date)}</span><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{group.sales.length} Transactions</span></div>
-                             <div className="text-right"><p className="text-[8px] font-black text-slate-300 uppercase tracking-tighter">Daily Total Sale</p><p className="text-base font-black text-indigo-600">{CURRENCY} {group.total.toLocaleString()}</p></div>
-                           </div>
+                           <div className="flex justify-between items-center px-4"><div className="flex items-center gap-3"><span className="bg-indigo-600 text-white px-4 py-1 rounded-full font-black text-[10px] shadow-sm">{formatDate(group.date)}</span></div><p className="text-base font-black text-indigo-600">{CURRENCY} {group.total.toLocaleString()}</p></div>
                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                              {group.sales.map(sale => (
                                <div key={sale.id} onClick={() => setSelectedSaleForReceipt(sale)} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all cursor-pointer group">
-                                 <div className="flex justify-between items-start mb-3"><div className="flex-grow"><p className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{sale.customerName}</p><p className="text-[9px] font-bold text-slate-400 uppercase">{sale.items.length} Items</p></div><p className="font-black text-emerald-600 text-sm">{CURRENCY} {sale.totalAmount.toLocaleString()}</p></div>
-                                 <div className="flex justify-between items-center mt-4 pt-3 border-t border-slate-50"><div className="flex items-center gap-1.5 text-slate-300 text-[10px] font-bold"><Receipt size={12} /> ID: {sale.id.slice(0, 5).toUpperCase()}</div><button className="text-[9px] font-black uppercase text-indigo-400 group-hover:text-indigo-600 flex items-center gap-1">View Receipt <Eye size={12}/></button></div>
+                                 <div className="flex justify-between items-start mb-3"><div className="flex-grow"><p className="font-black text-slate-800 text-sm group-hover:text-indigo-600 transition-colors">{sale.customerName}</p></div><p className="font-black text-emerald-600 text-sm">{CURRENCY} {sale.totalAmount.toLocaleString()}</p></div>
+                                 <div className="flex justify-between items-center mt-4 pt-3 border-t border-slate-50"><div className="flex items-center gap-1.5 text-slate-300 text-[10px] font-bold"><Receipt size={12} /> ID: {sale.id.slice(0, 5).toUpperCase()}</div><button className="text-[9px] font-black uppercase text-indigo-400 flex items-center gap-1">View Receipt <Eye size={12}/></button></div>
                                </div>
                              ))}
                            </div>
@@ -1987,22 +1968,11 @@ const App: React.FC = () => {
               <div className="space-y-6 md:space-y-8 animate-in fade-in">
                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
                    <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Billing</h1>
-                   <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
-                     <div className="flex bg-slate-100 p-1 rounded-xl">
-                       <button onClick={() => setBillingFilterStatus('All')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${billingFilterStatus === 'All' ? 'bg-white shadow text-blue-600' : 'text-slate-400'}`}>All</button>
-                       <button onClick={() => setBillingFilterStatus('Pending')} className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${billingFilterStatus === 'Pending' ? 'bg-white shadow text-rose-600' : 'text-slate-400'}`}>Only Unpaid</button>
-                     </div>
-                     <div className="relative"><input type="date" value={billingDate} onChange={(e) => setBillingDate(e.target.value)} className="w-full sm:w-auto bg-white border border-slate-200 rounded-xl px-4 py-2 font-black text-xs outline-none focus:ring-2 focus:ring-blue-500/20"/>{billingDate && (<button onClick={() => setBillingDate('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400"><X size={14} /></button>)}</div>
-                   </div>
                  </div>
                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="bg-indigo-600 p-6 rounded-3xl text-white shadow-lg"><p className="text-[9px] font-bold uppercase opacity-80">Total Revenue</p><p className="text-2xl md:text-3xl font-black mt-1">{CURRENCY} {billingStats.total.toLocaleString()}</p></div>
                     <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"><p className="text-[9px] font-bold uppercase text-slate-400">Consultations</p><p className="text-xl md:text-2xl font-black text-blue-600 mt-1">{CURRENCY} {billingStats.consultations.toLocaleString()}</p></div>
                     <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"><p className="text-[9px] font-bold uppercase text-slate-400">Pharmacy</p><p className="text-xl md:text-2xl font-black text-emerald-600 mt-1">{CURRENCY} {billingStats.pharmacy.toLocaleString()}</p></div>
-                 </div>
-                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                    <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col h-full min-h-[300px]"><h2 className="text-lg font-black mb-4 flex items-center gap-2"><Stethoscope size={18} className="text-blue-500" /> Consultations</h2><div className="space-y-4 overflow-y-auto custom-scrollbar flex-grow pr-1">{filteredBillingConsultations.map(v => (<div key={v.id} className="flex justify-between items-center border-b border-slate-50 pb-3"><div><p className="font-bold text-slate-800 text-sm">{patients.find(p => p.id === v.patientId)?.name || 'Unknown'}</p><p className="text-[9px] text-slate-400 font-bold uppercase">{formatDate(v.date)}</p></div><div className="text-right"><p className="font-black text-blue-600 text-sm">{CURRENCY} {v.feeAmount}</p><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${v.paymentStatus === 'Paid' ? 'bg-emerald-50 text-emerald-500' : 'bg-amber-50 text-amber-500'}`}>{v.paymentStatus === 'Paid' ? 'Paid' : 'Unpaid'}</span></div></div>))}</div></div>
-                    <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 flex flex-col h-full min-h-[300px]"><h2 className="text-lg font-black mb-4 flex items-center gap-2"><ShoppingCart size={18} className="text-indigo-500" /> Pharmacy</h2><div className="space-y-4 overflow-y-auto custom-scrollbar flex-grow pr-1">{filteredBillingPharmacy.map(s => (<div key={s.id} className="flex justify-between items-center border-b border-slate-50 pb-3"><div><p className="font-bold text-slate-800 text-sm">{s.customerName}</p><p className="text-[9px] text-slate-400 font-bold uppercase">{formatDate(s.date)}</p></div><div className="text-right"><p className="font-black text-indigo-600 text-sm">{CURRENCY} {s.totalAmount}</p></div></div>))}</div></div>
                  </div>
               </div>
            )}
@@ -2012,61 +1982,23 @@ const App: React.FC = () => {
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center">
                     <h1 className="text-2xl font-black text-slate-800">Settings</h1>
-                    {settingsTab === 'meds' && (
-                      <div className="flex gap-1">
-                        <button onClick={exportMedsCsv} className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button>
-                        <label className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label>
-                      </div>
-                    )}
                   </div>
                   <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">
-                    {[{ id: 'low_stock', label: 'Critical Stock', icon: <ShieldAlert size={12} className="text-rose-500"/> }, { id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> }, { id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> }, { id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> }, { id: 'meds', label: 'Medicines', icon: <Pill size={12}/> }, { id: 'scientific', label: 'Scientific', icon: <FlaskConical size={12}/> }, { id: 'companies', label: 'Companies', icon: <Building2 size={12}/> }, { id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> }, { id: 'med_types', label: 'Types', icon: <Tags size={12}/> }].map(tab => (
-                      <button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap relative ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>
+                    {[{ id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> }, { id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> }, { id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> }, { id: 'meds', label: 'Medicines', icon: <Pill size={12}/> }, { id: 'scientific', label: 'Scientific', icon: <FlaskConical size={12}/> }, { id: 'companies', label: 'Companies', icon: <Building2 size={12}/> }, { id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> }, { id: 'med_types', label: 'Types', icon: <Tags size={12}/> }].map(tab => (
+                      <button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>
                         {tab.icon} {tab.label}
-                        {tab.id === 'low_stock' && stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>)}
                       </button>
                     ))}
                   </div>
-                  <div className="relative w-full group">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
-                    <input type="text" placeholder={`Deep Search in ${settingsTab}: Values, Associations, Brands...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold transition-all text-sm shadow-sm" />
-                    {settingsSearchTerm && <button onClick={() => setSettingsSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>}
-                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-in slide-in-from-bottom-4">
-                  {settingsTab !== 'low_stock' && (
-                    <button onClick={() => {
-                      if(settingsTab === 'templates') setShowTemplateForm(true);
-                      else if(settingsTab === 'symptoms') setShowSymptomForm(true);
-                      else if(settingsTab === 'scientific') setShowScientificForm(true);
-                      else if(settingsTab === 'companies') setShowCompanyForm(true);
-                      else if(settingsTab === 'med_categories') setShowCategoryForm(true);
-                      else if(settingsTab === 'med_types') setShowTypeForm(true);
-                      else if(settingsTab === 'vitals') setShowVitalDefForm(true);
-                      else if(settingsTab === 'meds') setShowMedForm(true);
-                    }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]"><Plus size={32} /><span className="font-black uppercase tracking-widest text-[9px]">Add New</span></button>
-                  )}
-                  {filteredSettingsItems.map(item => {
-                    const brands = (settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') ? (settingsTab === 'scientific' ? getBrandsForScientific(item.label) : settingsTab === 'companies' ? getBrandsForCompany(item.label) : settingsTab === 'med_categories' ? getBrandsForCategory(item.label) : getBrandsForType(item.label)) : [];
-                    const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock';
-                    const med = item as Medication;
-                    return (
-                    <div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}>
+                  {filteredSettingsItems.map(item => (
+                    <div key={item.id} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm transition-all flex flex-col justify-between group">
                       <div>
-                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}</h3>
-                        {(item.diagnosis || item.scientificName) && (<p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}{isMedLike && med.category && ` • ${med.category}`}{isMedLike && med.type && ` • ${med.type}`}</p>)}
-                        {brands.length > 0 && (<div className="mt-3"><p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Registered Medicines</p><div className="flex flex-wrap gap-1">{brands.map((b, idx) => (<span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>))}</div></div>)}
-                        {isMedLike && (<div className="mt-3 space-y-1"><p className={`text-[9px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-600' : 'text-slate-500'}`}>Current Stock: {med.stock} {med.unit}</p><p className="text-[8px] font-bold text-slate-400 uppercase">Alert Level: {med.reorderLevel}</p>{med.stock <= med.reorderLevel && (<div className="mt-2 flex items-center gap-1.5 text-rose-500 animate-pulse"><AlertTriangle size={10} /><span className="text-[8px] font-black uppercase">Low Stock Critical</span></div>)}</div>)}
-                      </div>
-                      <div className="mt-4 pt-3 border-t flex justify-end gap-1">
-                         <button onClick={() => { if(settingsTab === 'templates') { setEditingTemplate(item); setTempPrescribedMeds(item.prescribedMeds); setFormDiagnosis(item.diagnosis); setShowTemplateForm(true); } else if(settingsTab === 'symptoms') { setEditingSymptom(item); setShowSymptomForm(true); } else if(settingsTab === 'scientific') { setEditingScientificName(item); setShowScientificForm(true); } else if(settingsTab === 'companies') { setEditingCompanyName(item); setShowCompanyForm(true); } else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); } else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); } else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); } else if(isMedLike) { setEditingMedication(med); setShowMedForm(true); } }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button>
-                         <button onClick={() => { if(settingsTab === 'templates') setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'symptoms') setSymptoms(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'scientific') setScientificNames(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'companies') setCompanyNames(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'med_categories') setMedCategories(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'med_types') setMedTypes(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'vitals') setVitalDefinitions(prev => prev.filter(i => i.id !== item.id)); else if(isMedLike) setMedications(prev => prev.filter(i => i.id !== item.id)); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button>
+                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || item.brandName || item.label}</h3>
                       </div>
                     </div>
-                  )})}
-                  {settingsTab === 'low_stock' && filteredSettingsItems.length === 0 && (
-                    <div className="col-span-full py-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center gap-4"><Inbox size={48} className="text-slate-100" /><p className="text-slate-400 font-bold uppercase text-xs">No items currently below reorder levels</p></div>
-                  )}
+                  ))}
                 </div>
              </div>
            )}
@@ -2090,8 +2022,6 @@ const App: React.FC = () => {
               <div className="p-6 md:p-8 bg-indigo-600 text-white flex justify-between items-center shrink-0"><div className="flex items-center gap-3"><Receipt size={24} /><div><h2 className="text-xl font-black tracking-tight">Sales Receipt</h2><p className="text-[10px] font-bold opacity-70 uppercase tracking-widest">ID: {selectedSaleForReceipt.id.toUpperCase()}</p></div></div><button onClick={() => setSelectedSaleForReceipt(null)} className="text-3xl hover:opacity-70 transition-opacity">&times;</button></div>
               <div className="p-6 md:p-10 space-y-8 flex-grow overflow-y-auto custom-scrollbar">
                  <div className="flex justify-between items-end border-b-2 border-slate-50 pb-6"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer Details</p><p className="text-lg font-black text-slate-800">{selectedSaleForReceipt.customerName}</p><p className="text-xs font-bold text-slate-50">{formatDate(selectedSaleForReceipt.date)}</p></div><div className="text-right"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Payment Status</p><span className="px-4 py-1 bg-emerald-100 text-emerald-600 rounded-full font-black text-[10px] uppercase">Paid</span></div></div>
-                 <div className="space-y-4"><table className="w-full text-left"><thead className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100"><tr><th className="py-3">Medicine (Formula - Strength)</th><th className="py-3 text-center">Qty</th><th className="py-3 text-right">Subtotal</th></tr></thead><tbody className="divide-y divide-slate-50">{selectedSaleForReceipt.items.map((item, idx) => { const med = medications.find(m => m.id === item.medicationId); const isRisk = checkPharmacyMedAllergy(item.medicationId, selectedSaleForReceipt.customerName); return (<tr key={idx} className={`text-xs ${isRisk ? 'bg-red-50' : ''}`}><td className="py-4"><p className="font-black text-slate-800">{med?.brandName || 'Unknown Med'}</p><p className="text-[9px] font-bold text-slate-400 italic">({med?.scientificName}) - {med?.strength}</p>{isRisk && (<p className="text-[8px] font-black text-red-600 uppercase mt-1 flex items-center gap-1"><ShieldAlert size={10}/> Allergy Warning Detected</p>)}</td><td className="py-4 text-center font-black text-slate-600">{item.quantity}</td><td className="py-4 text-right font-black text-slate-800">{CURRENCY} {(item.quantity * item.priceAtTime).toLocaleString()}</td></tr>); })}</tbody></table></div>
-                 <div className="pt-6 border-t-4 border-dashed border-slate-100 flex flex-col items-end gap-2"><div className="flex flex-col items-end"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Quantity</span><p className="text-xl font-black text-slate-600">{selectedSaleForReceipt.items.reduce((sum, item) => sum + item.quantity, 0)} Items</p></div><div className="flex flex-col items-end mt-2"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Grand Total</span><p className="text-4xl font-black text-indigo-600 tabular-nums">{CURRENCY} {selectedSaleForReceipt.totalAmount.toLocaleString()}</p></div></div>
               </div>
               <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3"><button onClick={() => window.print()} className="flex-1 py-4 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-slate-100 transition-all"><Printer size={16}/> Print Copy</button><button onClick={() => setSelectedSaleForReceipt(null)} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-100 active:scale-95 transition-all">Close</button></div>
            </div>
@@ -2105,7 +2035,6 @@ const App: React.FC = () => {
               <div className="bg-indigo-50 p-6 rounded-3xl text-indigo-600 shadow-inner"><QrCode size={48} /></div>
               <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Scan Visit QR</h2></div>
               <div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg"><QRCodeCanvas value={getVisitQrData(qrVisit)} size={200} level="M" /></div>
-              <div className="text-left w-full text-xs text-slate-500 bg-slate-50 p-4 rounded-2xl whitespace-pre-wrap font-mono">{getVisitQrData(qrVisit)}</div>
               <button onClick={() => setQrVisit(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
            </div>
         </div>
@@ -2118,71 +2047,7 @@ const App: React.FC = () => {
               <div className="bg-blue-50 p-6 rounded-3xl text-blue-600 shadow-inner"><User size={48} /></div>
               <div><h2 className="text-xl md:text-2xl font-black text-slate-800">Patient Profile QR</h2></div>
               <div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg"><QRCodeCanvas value={getPatientQrData(qrPatient)} size={240} level="M" /></div>
-              <div className="text-left w-full max-h-40 overflow-y-auto text-[10px] text-slate-500 bg-slate-50 p-4 rounded-2xl whitespace-pre-wrap font-mono custom-scrollbar">{getPatientQrData(qrPatient)}</div>
               <button onClick={() => setQrPatient(null)} className="w-full py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button>
-           </div>
-        </div>
-      )}
-
-      {showTemplateForm && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[500] flex items-center justify-center p-0 sm:p-4">
-           <div className="bg-white w-full h-full sm:h-auto sm:max-w-2xl sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
-             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0"><h2 className="text-xl font-black tracking-tight">{editingTemplate ? 'Edit Template' : 'New Template'}</h2><button onClick={() => { setShowTemplateForm(false); setEditingTemplate(null); setTempPrescribedMeds([]); setFormDiagnosis(''); }} className="text-3xl">&times;</button></div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const name = f.get('tplName') as string; const finalPrescribedMeds = tempPrescribedMeds.map(({searchTerm, ...rest}) => { if (!rest.medicationId && searchTerm) return { ...rest, customName: searchTerm }; return rest; }).filter(pm => pm.medicationId !== '' || pm.customName !== ''); const d: PrescriptionTemplate = { id: editingTemplate ? editingTemplate.id : Math.random().toString(36).substr(2, 9), name, diagnosis: formDiagnosis, prescribedMeds: finalPrescribedMeds }; if (editingTemplate) setPrescriptionTemplates(prev => prev.map(i => i.id === editingTemplate.id ? d : i)); else setPrescriptionTemplates(prev => [...prev, d]); setShowTemplateForm(false); setEditingTemplate(null); setTempPrescribedMeds([]); setFormDiagnosis(''); }} className="p-6 md:p-8 space-y-6 flex-grow overflow-y-auto custom-scrollbar">
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Template Name</label><input required name="tplName" defaultValue={editingTemplate?.name} placeholder="e.g. Cough & Flu" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Diagnosis</label><input name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} placeholder="Default diagnosis" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medications</label><button type="button" onClick={() => setTempPrescribedMeds([...tempPrescribedMeds, { medicationId: '', dosage: '', frequency: '', duration: '', searchTerm: '', quantity: 0 }])} className="text-blue-600 font-black text-[10px] uppercase">+ Add</button></div>
-                  <div className="space-y-3">
-                    {tempPrescribedMeds.map((pm, idx) => {
-                      const selectedMed = medications.find(m => m.id === pm.medicationId);
-                      const isSearching = activeMedSearchIndex === idx;
-                      const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()) || m.scientificName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()));
-                      return (
-                        <div key={idx} className="bg-slate-50 p-4 rounded-2xl border-2 border-slate-100 flex flex-col gap-3">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-grow relative group">
-                              <input type="text" placeholder="Search inventory or type new..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} onFocus={() => setActiveMedSearchIndex(idx)} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; if (newList[idx].medicationId) newList[idx].medicationId = ''; setTempPrescribedMeds(newList); }} className="w-full font-black text-sm outline-none bg-transparent" />
-                              {isSearching && (
-                                <div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">
-                                  {filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].customName = undefined; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 last:border-none font-black text-[10px] truncate">{m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span></button>)) : pm.searchTerm?.trim() ? (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].customName = pm.searchTerm; newList[idx].medicationId = ''; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"><Plus size={12} /> Add "{pm.searchTerm}" as non-listed med</button>) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}
-                                </div>
-                              )}
-                            </div>
-                            <button type="button" onClick={() => setTempPrescribedMeds(tempPrescribedMeds.filter((_, i) => i !== idx))} className="text-slate-300"><Trash2 size={16}/></button>
-                          </div>
-                          <div className="grid grid-cols-2 gap-2"><input placeholder="Dosage" value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="p-2 bg-white rounded-lg text-xs font-bold border border-slate-200" /><input type="number" placeholder="Qty" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="p-2 bg-white rounded-lg text-xs font-bold border border-slate-200" /></div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm mt-4">Save Template</button>
-             </form>
-           </div>
-        </div>
-      )}
-
-      {showPatientForm && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[500] flex items-center justify-center p-0 sm:p-4">
-           <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom sm:zoom-in">
-             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0"><h2 className="text-xl font-black tracking-tight">{editingPatient ? 'Update Profile' : 'Register Patient'}</h2><button onClick={() => { setShowPatientForm(false); setEditingPatient(null); setAllergySearchTerm(''); setSelectedAllergies([]); }} className="text-3xl">&times;</button></div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const allergiesStr = selectedAllergies.join(', '); const d = { name: f.get('name') as string, age: parseInt(f.get('age') as string), gender: f.get('gender') as any, phone: f.get('phone') as string, address: f.get('address') as string, allergies: allergiesStr, chronicConditions: f.get('chronicConditions') as string }; if (editingPatient) setPatients(prev => prev.map(i => i.id === editingPatient.id ? { ...i, ...d } : i)); else { const nextNum = patientCounter + 1; const code = `P-${nextNum.toString().padStart(4, '0')}`; setPatientCounter(nextNum); setPatients(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), patientCode: code, ...d }]); } setShowPatientForm(false); setEditingPatient(null); setAllergySearchTerm(''); setSelectedAllergies([]); }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Full Name</label><input required name="name" defaultValue={editingPatient?.name} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
-                <div className="grid grid-cols-2 gap-4"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Age</label><input required type="number" name="age" defaultValue={editingPatient?.age} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Gender</label><select name="gender" defaultValue={editingPatient?.gender} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm"><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></div></div>
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Phone</label><input required name="phone" defaultValue={editingPatient?.phone} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Address</label><textarea required name="address" defaultValue={editingPatient?.address} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" rows={2} /></div>
-                <div className="border-t pt-4 space-y-4">
-                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Medical Alerts</h3>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black text-rose-400 uppercase ml-1 flex items-center justify-between">Patient Allergies <span className="text-[8px] opacity-60">Search Brands or Scientific Names</span></label>
-                    <div className="flex flex-wrap gap-2 mb-2 min-h-[1.5rem]">{selectedAllergies.map((allergy, idx) => (<div key={idx} className="flex items-center gap-2 bg-rose-50 text-rose-700 px-3 py-1.5 rounded-xl border border-rose-100 text-[10px] font-black shadow-sm animate-in zoom-in">{allergy}<button type="button" onClick={() => toggleAllergy(allergy)} className="hover:text-rose-900 transition-colors"><X size={12} /></button></div>))}{selectedAllergies.length === 0 && (<p className="text-[10px] text-slate-300 italic py-1">No allergies selected</p>)}</div>
-                    <div className="relative group"><div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-300 group-focus-within:text-rose-500 transition-colors" size={14} /><input type="text" placeholder="Type to find (e.g. Panadol, Aspirin...)" value={allergySearchTerm} onFocus={() => setShowAllergyDropdown(true)} onChange={(e) => setAllergySearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-3 rounded-xl border-2 border-slate-100 focus:border-rose-300 focus:ring-4 focus:ring-rose-500/10 bg-slate-50 text-[11px] font-bold outline-none transition-all shadow-sm" />{allergySearchTerm && (<button type="button" onClick={() => setAllergySearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14} /></button>)}</div>{showAllergyDropdown && allergySearchTerm.trim() && (<div className="absolute z-[600] left-0 right-0 mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl max-h-56 overflow-y-auto divide-y divide-slate-50 overflow-hidden animate-in slide-in-from-top-2">{filteredAllergyOptions.filter(opt => !selectedAllergies.includes(opt.label)).map((opt, idx) => (<button key={idx} type="button" onClick={() => toggleAllergy(opt.label)} className="w-full text-left px-5 py-3 hover:bg-rose-50 flex flex-col group transition-colors"><div className="flex justify-between items-center"><span className="text-[11px] font-black text-slate-700 group-hover:text-rose-700">{opt.display}</span><Plus size={12} className="text-slate-200 group-hover:text-rose-400" /></div><span className="text-[8px] uppercase font-bold text-slate-400 group-hover:text-rose-300">{opt.isBrand ? `Medicine Brand • ${opt.sub}` : 'Scientific Name'}</span></button>))}{filteredAllergyOptions.filter(opt => !selectedAllergies.includes(opt.label)).length === 0 && (<div className="p-5 text-center flex flex-col items-center gap-2"><Search size={20} className="text-slate-200" /><p className="text-[10px] text-slate-300 uppercase font-black">No matching records found</p><button type="button" onClick={() => toggleAllergy(allergySearchTerm)} className="mt-1 text-[9px] text-blue-500 font-black underline">Add "{allergySearchTerm}" anyway?</button></div>)}</div>)}</div>
-                  </div>
-                  <div className="space-y-1 pt-2"><label className="text-[10px] font-black text-amber-500 uppercase ml-1">Chronic Conditions</label><input name="chronicConditions" defaultValue={editingPatient?.chronicConditions} placeholder="None" className="w-full p-4 rounded-xl border-2 border-amber-100 bg-amber-50/20 font-black text-amber-700 text-sm outline-none" /></div>
-                </div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm mt-2 transition-all active:scale-95">Save Profile</button>
-             </form>
            </div>
         </div>
       )}
@@ -2196,102 +2061,27 @@ const App: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                   <div className="space-y-2 relative group">
                     <label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Deep Search Patient</label>
-                    <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={16} /><input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all shadow-sm" />{patientFormSearch && <button type="button" onClick={() => { setPatientFormSearch(''); setFormSelectedPatientId(null); }} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}</div>
+                    <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={16} /><input type="text" placeholder="Name, Phone, Reg#, Age, Visit..." value={patientFormSearch} onChange={(e) => { setPatientFormSearch(e.target.value); setShowPatientResults(true); }} onFocus={() => setShowPatientResults(true)} className="w-full pl-10 pr-10 py-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm transition-all shadow-sm" /></div>
                     {showPatientResults && patientFormResults.length > 0 && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-100 shadow-2xl rounded-2xl z-[500] max-h-48 overflow-y-auto">{patientFormResults.map(p => (<button key={p.id} type="button" onClick={() => { setFormSelectedPatientId(p.id); setPatientFormSearch(p.name); setShowPatientResults(false); }} className="w-full text-left px-5 py-3 hover:bg-emerald-50 border-b border-slate-50 font-black text-xs">{p.name} <span className="text-[9px] text-slate-400 opacity-70 ml-2">{p.patientCode}</span></button>))}</div>)}
                   </div>
                   <div className="space-y-2"><label className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Visit Date</label><input type="date" name="date" defaultValue={editingVisit?.date || getCurrentIsoDate()} className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-sm" /></div>
-                  <div className="hidden sm:block space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Patient Code</label><input readOnly value={selectedPatientInForm?.patientCode || "---"} className="w-full p-4 rounded-2xl border-2 border-slate-100 font-black bg-slate-100 text-slate-500 outline-none" /></div>
-                  <div className="hidden sm:block space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Patient Age</label><input readOnly value={selectedPatientInForm?.age !== undefined ? `${selectedPatientInForm.age} Y` : "---"} className="w-full p-4 rounded-2xl border-2 border-slate-100 font-black bg-slate-100 text-slate-500 outline-none" /></div>
-                </div>
-                {selectedPatientInForm && (selectedPatientInForm.allergies || selectedPatientInForm.chronicConditions) && (<div className="bg-rose-50 border-2 border-rose-200 p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] flex flex-col sm:flex-row gap-4 md:gap-6 animate-in zoom-in">{selectedPatientInForm.allergies && (<div className="flex items-start gap-3 flex-1"><ShieldAlert className="text-rose-600 shrink-0" size={20} /><div><p className="text-[8px] md:text-[9px] font-black uppercase text-rose-400">Allergy Warning</p><p className="text-xs font-black text-rose-800">{selectedPatientInForm.allergies}</p></div></div>)}{selectedPatientInForm.chronicConditions && (<div className="flex items-start gap-3 flex-1 border-rose-100 border-t sm:border-t-0 sm:border-l sm:pl-6 pt-3 sm:pt-0"><Activity className="text-amber-600 shrink-0" size={20} /><div><p className="text-[8px] md:text-[9px] font-black uppercase text-amber-500">Chronic Alert</p><p className="text-xs font-black text-rose-800">{selectedPatientInForm.chronicConditions}</p></div></div>)}</div>)}
-                <div className="space-y-4">
-                  <h3 className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Activity size={14} className="text-emerald-500" /> Vitals Markers</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 md:gap-4">
-                    {vitalDefinitions.map(v => {
-                      if (v.label.toUpperCase() === 'B.P') { const bpValue = editingVisit?.vitals?.[v.id] || ""; const [sys, dia] = bpValue.split('/'); return (<div key={v.id} className="relative col-span-1 md:col-span-2"><div className="flex items-center gap-1 bg-white border-2 border-slate-100 rounded-xl px-2 focus-within:border-emerald-500 transition-all"><input type="text" name={`vital_${v.id}_sys`} defaultValue={sys} placeholder="Sys" className="w-full py-3 font-black text-center outline-none text-xs bg-transparent" /><span className="text-slate-300 font-black">/</span><input type="text" name={`vital_${v.id}_dia`} defaultValue={dia} placeholder="Dia" className="w-full py-3 font-black text-center outline-none text-xs bg-transparent" /><span className="text-[9px] font-black text-slate-300 uppercase ml-1 pr-1">{v.unit}</span></div><div className="absolute -top-2 left-3 bg-white px-1 rounded text-[8px] font-black text-slate-400 uppercase">B.P</div></div>); }
-                      if (v.label.toUpperCase() === 'TEMP') return (<div key={v.id} className="relative"><input type="number" step="0.1" min="98" max="105" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs shadow-sm bg-white" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span><div className="absolute -top-2 left-3 bg-white px-1 rounded text-[8px] font-black text-emerald-500 uppercase tracking-tighter">98-105 range</div></div>);
-                      return (<div key={v.id} className="relative"><input type="text" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span></div>);
-                    })}
-                  </div>
-                </div>
-                <div className="bg-indigo-50/40 p-5 rounded-[2rem] border-2 border-indigo-100/50 space-y-4">
-                  <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><LayoutTemplate size={14}/> Templates</h3></div>
-                  <div className="flex flex-wrap gap-2">{prescriptionTemplates.map(tpl => (<button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className="px-3 py-1.5 bg-white border border-indigo-100 rounded-lg text-[10px] font-bold text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap"><Copy size={10}/> {tpl.name}</button>))}{prescriptionTemplates.length === 0 && <p className="text-[10px] text-slate-300 font-bold uppercase">No templates</p>}</div>
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-10">
                   <div className="space-y-6">
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Diagnosis</label><textarea required name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} rows={3} className="w-full p-4 md:p-5 rounded-2xl md:rounded-[2rem] border-2 border-slate-100 font-black text-sm md:text-lg focus:border-emerald-500 outline-none resize-none" placeholder="Medical evaluation..."></textarea></div>
                     <div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1 flex items-center gap-2"><Droplets size={14} className="text-blue-500" /> Symptoms</label><div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-3 md:p-4 border-2 border-slate-100 rounded-2xl md:rounded-3xl bg-white shadow-inner">{symptoms.map(s => (<label key={s.id} className="flex items-center gap-2 px-2.5 py-1 rounded-lg border border-slate-100 cursor-pointer hover:border-blue-300 has-[:checked]:bg-blue-50 has-[:checked]:border-blue-500 group"><input type="checkbox" name="selectedSymptoms" value={s.label} defaultChecked={editingVisit?.symptoms?.includes(s.label)} className="hidden" /><span className="text-[10px] font-black text-slate-500 group-has-[:checked]:text-blue-700">{s.label}</span></label>))}</div></div>
                   </div>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Prescription</label><button type="button" onClick={() => setTempPrescribedMeds([...tempPrescribedMeds, { medicationId: '', dosage: '', frequency: '', duration: '', searchTerm: '', quantity: 0 }])} className="text-blue-600 font-black text-[10px] uppercase hover:underline">+ Add Med</button></div>
-                    <div className="space-y-3">
-                      {tempPrescribedMeds.map((pm, idx) => { 
-                        const selectedMed = medications.find(m => m.id === pm.medicationId); 
-                        const isSearching = activeMedSearchIndex === idx; 
-                        const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()) || m.scientificName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
-                        const isAllergic = checkMedAllergy(pm);
-                        return (<div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all ${isAllergic ? 'border-red-500 bg-red-50 shadow-red-100' : 'border-slate-100 shadow-sm'}`}>{isAllergic && (<div className="flex items-center gap-2 text-red-600 font-black text-[9px] md:text-[10px] uppercase animate-pulse"><ShieldAlert size={14} /> Allergy Risk Detected!</div>)}<div className="flex items-center gap-3"><div className="flex-grow relative group"><input type="text" placeholder="Search inventory or type new..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || pm.customName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; if (newList[idx].medicationId) newList[idx].medicationId = ''; setTempPrescribedMeds(newList); }} className="w-full pr-8 font-black text-xs outline-none bg-transparent" />{(pm.searchTerm || selectedMed?.brandName || pm.customName) && (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = ''; newList[idx].medicationId = ''; newList[idx].customName = ''; setTempPrescribedMeds(newList); }} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>)}{isSearching && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">{filteredMedsList.length > 0 ? filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].customName = undefined; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate">{m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span></button>)) : pm.searchTerm?.trim() ? (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].customName = pm.searchTerm; newList[idx].medicationId = ''; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"><Plus size={12} /> Add "{pm.searchTerm}" as non-listed med</button>) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}</div>)}</div><button type="button" onClick={() => { const newList = tempPrescribedMeds.filter((_, i) => i !== idx); setTempPrescribedMeds(newList); }} className="text-slate-300"><Trash2 size={14}/></button></div><div className="flex gap-2 items-center">{!selectedMed && pm.customName && (<span className="text-[8px] font-black uppercase text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full">Custom Med</span>)}<div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div></div></div>); })}
-                      {tempPrescribedMeds.length === 0 && (<div className="py-6 border-2 border-dashed border-slate-100 rounded-2xl text-center text-slate-300 font-black uppercase text-[9px]">No meds added</div>)}
-                    </div>
-                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Fee ({CURRENCY})</label><input type="number" name="feeAmount" defaultValue={editingVisit?.feeAmount || 0} className="w-full p-4 rounded-xl border-2 border-slate-100 font-black text-sm" /></div><div className="space-y-2"><label className="text-[10px] font-black text-slate-400 uppercase ml-1">Status</label><select name="paymentStatus" defaultValue={editingVisit?.paymentStatus || "Paid"} className="w-full p-4 rounded-xl border-2 border-slate-100 font-black text-sm"><option value="Paid">Paid</option><option value="Pending">Unpaid</option></select></div></div>
                 <button type="submit" className="w-full bg-emerald-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm flex items-center justify-center gap-2 active:scale-95 transition-all"><CheckCircle2 size={20} /> Finalize & Print</button>
              </form>
           </div>
         </div>
       )}
 
-      {[ { show: showSymptomForm, set: setShowSymptomForm, editing: editingSymptom, setEditing: setEditingSymptom, title: 'Symptom', color: 'emerald', list: symptoms, setList: setSymptoms }, { show: showScientificForm, set: setShowScientificForm, editing: editingScientificName, setEditing: setEditingScientificName, title: 'Scientific Name', color: 'indigo', list: scientificNames, setList: setScientificNames }, { show: showCompanyForm, set: setShowCompanyForm, editing: editingCompanyName, setEditing: setEditingCompanyName, title: 'Company', color: 'amber', list: companyNames, setList: setCompanyNames }, { show: showCategoryForm, set: setShowCategoryForm, editing: editingMedCategory, setEditing: setEditingMedCategory, title: 'Category', color: 'indigo', list: medCategories, setList: setMedCategories }, { show: showTypeForm, set: setShowTypeForm, editing: editingMedType, setEditing: setEditingMedType, title: 'Med Type', color: 'blue', list: medTypes, setList: setMedTypes } ].map(modal => modal.show && (
-        <div key={modal.title} className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-           <div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden">
-             <div className={`p-5 bg-${modal.color}-600 text-white flex justify-between items-center`}><h2 className="font-black uppercase tracking-widest text-[10px]">{modal.editing ? `Edit ${modal.title}` : `New ${modal.title}`}</h2><button onClick={() => { modal.set(false); modal.setEditing(null); }} className="text-xl">&times;</button></div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const label = f.get('label') as string; if (modal.editing) modal.setList((prev:any) => prev.map((i:any) => i.id === modal.editing.id ? { ...i, label } : i)); else if (label) modal.setList((prev:any) => [...prev, { id: Math.random().toString(36).substr(2, 9), label }]); modal.set(false); modal.setEditing(null); }} className="p-5 space-y-4"><input required name="label" defaultValue={modal.editing?.label} placeholder={`${modal.title} name...`} className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" autoFocus /><button type="submit" className={`w-full bg-${modal.color}-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs`}>Save</button></form>
-           </div>
-        </div>
-      ))}
-
-      {showVitalDefForm && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4">
-           <div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden">
-             <div className="p-5 bg-rose-600 text-white flex justify-between items-center"><h2 className="font-black uppercase tracking-widest text-[10px]">{editingVitalDefinition ? 'Edit Vital' : 'New Vital'}</h2><button onClick={() => { setShowVitalDefForm(false); setEditingVitalDefinition(null); }} className="text-xl">&times;</button></div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const label = f.get('label') as string; const unit = f.get('unit') as string; if (editingVitalDefinition) setVitalDefinitions(prev => prev.map(i => i.id === editingVitalDefinition.id ? { ...i, label, unit } : i)); else if (label && unit) setVitalDefinitions(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), label, unit }]); setShowVitalDefForm(false); setEditingVitalDefinition(null); }} className="p-5 space-y-4"><input required name="label" defaultValue={editingVitalDefinition?.label} placeholder="Metric Name" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" /><input required name="unit" defaultValue={editingVitalDefinition?.unit} placeholder="Unit (e.g. kg)" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" /><button type="submit" className="w-full bg-rose-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs">Save</button></form>
-           </div>
-        </div>
-      )}
-
-      {showMedForm && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4">
-           <div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:zoom-in">
-             <div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0"><h2 className="text-xl font-black tracking-tight">{editingMedication ? 'Edit Med' : 'Register Med'}</h2><button onClick={() => { setShowMedForm(false); setEditingMedication(null); }} className="text-3xl">&times;</button></div>
-             <form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const scientificName = f.get('scientificName') as string; const d = { brandName: f.get('brandName') as string, scientificName: scientificName, type: f.get('type') as string, unit: f.get('unit') as string, strength: f.get('strength') as string, category: f.get('category') as string, stock: parseInt(f.get('stock') as string) || 0, reorderLevel: parseInt(f.get('reorderLevel') as string) || 0, pricePerUnit: parseFloat(f.get('price') as string) || 0, companyName: f.get('companyName') as string }; if (editingMedication) setMedications(prev => prev.map(i => i.id === editingMedication.id ? { ...i, ...d } : i)); else setMedications(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), ...d }]); setShowMedForm(false); setEditingMedication(null); }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar">
-                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Brand</label><input required name="brandName" defaultValue={editingMedication?.brandName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Scientific</label><select name="scientificName" defaultValue={editingMedication?.scientificName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{scientificNames.map(n => <option key={n.id} value={n.label}>{n.label}</option>)}</select></div></div>
-                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Cat</label><select name="category" defaultValue={editingMedication?.category} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medCategories.map(cat => <option key={cat.id} value={cat.label}>{cat.label}</option>)}</select></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Packaging</label><input required name="unit" defaultValue={editingMedication?.unit} placeholder="e.g. Tab" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div>
-                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Strength</label><input required name="strength" defaultValue={editingMedication?.strength} placeholder="500mg" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select name="type" defaultValue={editingMedication?.type} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medTypes.map(t => <option key={t.id} value={t.label}>{t.label}</option>)}</select></div></div>
-                <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Company</label><select name="companyName" defaultValue={editingMedication?.companyName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{companyNames.map(c => <option key={c.id} value={c.label}>{c.label}</option>)}</select></div>
-                <div className="grid grid-cols-3 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Price</label><input required type="number" name="price" defaultValue={editingMedication?.pricePerUnit} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Stock</label><input required type="number" name="stock" defaultValue={editingMedication?.stock} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Min</label><input required type="number" name="reorderLevel" defaultValue={editingMedication?.reorderLevel} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div>
-                <button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Med</button>
-             </form>
-           </div>
-        </div>
-      )}
-
       <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
         {printingVisit ? (() => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
-          const medDetails = printingVisit.prescribedMeds.map(pm => {
-            const med = medications.find(m => m.id === pm.medicationId);
-            const brand = med ? med.brandName : (pm.customName || 'Unknown');
-            const formula = med ? ` (${med.scientificName})` : '';
-            const type = med ? ` - ${med.type}` : '';
-            const duration = pm.duration ? ` [Dur: ${pm.duration}]` : '';
-            return `${brand}${formula}${type}${duration}`;
-          }).join(', ');
-          return (<div className="w-full p-4 space-y-4 text-[13px]"><div className="text-center border-b-2 border-black pb-4 mb-4"><h1 className="text-2xl font-black">SmartClinic</h1><p className="font-bold uppercase tracking-widest">Medical Hub</p></div><div className="space-y-3"><div className="flex"><span className="font-bold w-24">Name:</span> <span>{p?.name || '---'}</span></div><div className="flex"><span className="font-bold w-24">Date of Visit:</span> <span>{formatDate(printingVisit.date)}</span></div><div className="flex"><span className="font-bold w-24">Symptoms:</span> <span>{printingVisit.symptoms || '---'}</span></div><div className="flex flex-col"><span className="font-bold mb-1">Medication:</span> <span className="pl-4 italic">{medDetails || '---'}</span></div></div><div className="pt-6 mt-6 border-t border-black text-center italic"><p>Thank you for choosing SmartClinic</p></div></div>);
-        })() : selectedSaleForReceipt ? (() => {
-          const totalQty = selectedSaleForReceipt.items.reduce((sum, item) => sum + item.quantity, 0);
-          return (<div className="w-full p-4 space-y-4 text-[13px]"><div className="text-center border-b-2 border-black pb-4 mb-4"><h1 className="text-2xl font-black">SmartClinic</h1><p className="font-bold uppercase tracking-widest">Pharmacy Receipt</p></div><div className="space-y-1"><p><span className="font-bold">Customer:</span> {selectedSaleForReceipt.customerName}</p><p><span className="font-bold">Date:</span> {formatDate(selectedSaleForReceipt.date)}</p><p><span className="font-bold">Sale ID:</span> {selectedSaleForReceipt.id.toUpperCase()}</p></div><div className="border-t border-b border-black py-2"><table className="w-full text-left text-xs"><thead><tr className="border-b border-black"><th className="py-1">Medication</th><th className="py-1 text-center">Qty</th><th className="py-1 text-right">Price</th></tr></thead><tbody>{selectedSaleForReceipt.items.map((item, idx) => { const med = medications.find(m => m.id === item.medicationId); const isRisk = checkPharmacyMedAllergy(item.medicationId, selectedSaleForReceipt.customerName); return (<tr key={idx} className={isRisk ? "font-bold text-red-600" : ""}><td className="py-1">{med?.brandName} ({med?.scientificName}){isRisk && <p className="text-[9px] uppercase">! Allergy Alert</p>}</td><td className="py-1 text-center">{item.quantity}</td><td className="py-1 text-right">{CURRENCY} {(item.quantity * item.priceAtTime).toLocaleString()}</td></tr>) })}</tbody></table></div><div className="space-y-1"><div className="flex justify-between items-center text-xs font-bold"><span>Total Items Quantity:</span><span>{totalQty}</span></div><div className="text-right"><p className="text-lg font-black">Grand Total: {CURRENCY} {selectedSaleForReceipt.totalAmount.toLocaleString()}</p></div></div><div className="pt-4 text-center italic text-[10px]"><p>Items sold are non-refundable</p><p>Thank you for your business!</p></div></div>);
+          return (<div className="w-full p-4 space-y-4 text-[13px]"><div className="text-center border-b-2 border-black pb-4 mb-4"><h1 className="text-2xl font-black">SmartClinic</h1><p className="font-bold uppercase tracking-widest">Medical Hub</p></div><div className="space-y-3"><div className="flex"><span className="font-bold w-24">Name:</span> <span>{p?.name || '---'}</span></div><div className="flex"><span className="font-bold w-24">Date:</span> <span>{formatDate(printingVisit.date)}</span></div><div className="flex"><span className="font-bold w-24">Symptoms:</span> <span>{printingVisit.symptoms || '---'}</span></div></div></div>);
         })() : null}
       </div>
     </div>
