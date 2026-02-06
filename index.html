@@ -50,8 +50,21 @@
             .no-print {
                 display: none !important;
             }
-            #root > *:not(.print-only) {
+            /* Fixed: Hide UI elements specifically to allow nested print-only elements to show */
+            aside, main, nav, header, footer, .fixed:not(.print-only) {
                 display: none !important;
+            }
+            #root {
+                margin: 0;
+                padding: 0;
+            }
+            .print-only {
+                display: block !important;
+                position: static !important;
+                visibility: visible !important;
+                width: 80mm !important;
+                height: auto !important;
+                overflow: visible !important;
             }
         }
         

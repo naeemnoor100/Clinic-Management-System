@@ -3258,7 +3258,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <div className="hidden print:block print-only fixed inset-0 bg-white text-black font-sans leading-tight z-[1000] print-container">
+      {/* Fixed: Removed fixed inset-0 and added visibility logic for print preview */}
+      <div className="hidden print:block print-only bg-white text-black font-sans leading-tight z-[1000] print-container">
         {printingVisit ? (() => {
           const p = patients.find(pat => pat.id === printingVisit.patientId);
           const medDetails = printingVisit.prescribedMeds.map(pm => {
