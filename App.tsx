@@ -76,7 +76,10 @@ import {
   Baby,
   Accessibility,
   Info,
-  ShieldCheck
+  ShieldCheck,
+  ToggleLeft as Toggle,
+  ToggleRight as ToggleOn,
+  Globe2
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -104,7 +107,7 @@ const getCurrentIsoDate = () => new Date().toISOString().split('T')[0];
 
 // --- Constants ---
 const CURRENCY = "Rs.";
-const SYNC_API_URL = "https://httpbin.org/post"; 
+const DEFAULT_SYNC_URL = "https://httpbin.org/post"; 
 
 // --- Expanded Dummy Data ---
 const dummyScientificNames: ScientificName[] = [
@@ -250,7 +253,9 @@ const App: React.FC = () => {
     return saved ? parseInt(saved, 10) : 16;
   });
 
-  // Cloud Sync States
+  // --- Real-time Sync States ---
+  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => getFromLocal('auto_sync_enabled', false));
+  const [syncEndpoint, setSyncEndpoint] = useState<string>(() => getFromLocal('sync_endpoint', DEFAULT_SYNC_URL));
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
@@ -399,6 +404,7 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view]);
 
+  // --- Real-time Auto Sync Trigger ---
   useEffect(() => {
     saveToLocal('patients', patients);
     saveToLocal('meds', medications);
@@ -412,19 +418,29 @@ const App: React.FC = () => {
     saveToLocal('visits', visits);
     saveToLocal('pharmacy_sales', pharmacySales);
     saveToLocal('clinic_sync_code', clinicSyncCode);
-  }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, clinicSyncCode]);
+    saveToLocal('auto_sync_enabled', isAutoSyncEnabled);
+    saveToLocal('sync_endpoint', syncEndpoint);
 
-  // --- Enhanced Cloud Sync Logic ---
-  const handleCloudSync = async (type: 'backup' | 'restore') => {
+    // If auto-sync is on, trigger a background backup
+    if (isAutoSyncEnabled && !isSyncing) {
+       handleCloudSync('backup', true);
+    }
+  }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, clinicSyncCode, isAutoSyncEnabled, syncEndpoint]);
+
+  // --- Enhanced Cloud Sync Logic with Auto-Sync Support ---
+  const handleCloudSync = async (type: 'backup' | 'restore', isBackground = false) => {
+    if (isSyncing) return;
     setIsSyncing(true);
-    setSyncStatus('idle');
-    setSyncProgress(0);
-    setSyncStatusMessage(type === 'backup' ? 'Initializing Secure Transmission...' : 'Contacting API Gateway...');
+    if (!isBackground) {
+       setSyncStatus('idle');
+       setSyncProgress(0);
+       setSyncStatusMessage(type === 'backup' ? 'Initializing Secure Transmission...' : 'Contacting API Gateway...');
+    }
     
     try {
-      await new Promise(r => setTimeout(r, 600));
+      if (!isBackground) await new Promise(r => setTimeout(r, 600));
       setSyncProgress(25);
-      setSyncStatusMessage(type === 'backup' ? 'Encrypting Clinical Records...' : 'Authenticating Clinic ID...');
+      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Encrypting Clinical Records...' : 'Authenticating Clinic ID...');
 
       const cloudData = {
         patients,
@@ -442,11 +458,11 @@ const App: React.FC = () => {
         clinicSyncCode: joinCode || clinicSyncCode
       };
 
-      await new Promise(r => setTimeout(r, 600));
+      if (!isBackground) await new Promise(r => setTimeout(r, 600));
       setSyncProgress(50);
-      setSyncStatusMessage(type === 'backup' ? 'Compressing Data Packets...' : 'Fetching Data from Cloud...');
+      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Compressing Data Packets...' : 'Fetching Data from Cloud...');
 
-      const response = await fetch(SYNC_API_URL, {
+      const response = await fetch(syncEndpoint || DEFAULT_SYNC_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -461,19 +477,19 @@ const App: React.FC = () => {
       });
 
       if (!response.ok) {
-        throw new Error("Cloud Server Error: Failed to reach sync endpoint.");
+        throw new Error("Server Error: Failed to reach sync endpoint.");
       }
 
-      await new Promise(r => setTimeout(r, 800));
+      if (!isBackground) await new Promise(r => setTimeout(r, 800));
       setSyncProgress(75);
-      setSyncStatusMessage(type === 'backup' ? 'Verifying Integrity...' : 'Updating Local Database...');
+      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Verifying Integrity...' : 'Updating Local Database...');
 
       if (type === 'backup') {
         localStorage.setItem(`cloud_data_${clinicSyncCode}`, JSON.stringify(cloudData));
       } else {
         const targetCode = joinCode || clinicSyncCode;
         const raw = localStorage.getItem(`cloud_data_${targetCode}`);
-        if (!raw) throw new Error("No cloud record found for this Clinic Code. Please check the code and try again.");
+        if (!raw) throw new Error("No cloud record found for this Clinic Code.");
         
         const data = JSON.parse(raw);
         setPatients(data.patients || []);
@@ -496,13 +512,17 @@ const App: React.FC = () => {
       saveToLocal('last_synced', now);
       
       setSyncProgress(100);
-      setSyncStatusMessage(type === 'backup' ? 'Sync Completed Successfully.' : 'Cloud Data Restored Successfully.');
-      setSyncStatus('success');
-      setJoinCode('');
+      if (!isBackground) {
+        setSyncStatusMessage(type === 'backup' ? 'Sync Completed Successfully.' : 'Cloud Data Restored.');
+        setSyncStatus('success');
+        setJoinCode('');
+      }
     } catch (e: any) {
       console.error("Sync Error:", e);
-      setSyncStatus('error');
-      setSyncStatusMessage(e.message || "Online synchronization failed.");
+      if (!isBackground) {
+        setSyncStatus('error');
+        setSyncStatusMessage(e.message || "Online synchronization failed.");
+      }
     } finally {
       setIsSyncing(false);
     }
@@ -1185,7 +1205,9 @@ const App: React.FC = () => {
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       <header className="md:hidden sticky top-0 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4 py-3 shrink-0 print:hidden">
         <div className="flex items-center gap-2"><div className="bg-blue-600 p-2 rounded-xl text-white"><Stethoscope size={20} /></div><span className="text-lg font-black text-slate-800 tracking-tighter">SmartClinic</span></div>
-        <div className="flex items-center gap-2"><button onClick={() => setView('sync')} className={`p-2 rounded-xl transition-colors relative ${view === 'sync' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'}`}><Cloud size={20} /><span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span></button><button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 bg-slate-50 text-slate-500 rounded-xl"><Bell size={20} />{stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-[8px] text-white font-black animate-bounce">{stats.lowStockCount}</span>)}</button><button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg"><Plus size={20} /></button></div>
+        <div className="flex items-center gap-2">
+          {isSyncing && <RefreshCw size={18} className="text-blue-500 animate-spin mr-2" />}
+          <button onClick={() => setView('sync')} className={`p-2 rounded-xl transition-colors relative ${view === 'sync' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'}`}><Cloud size={20} /><span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span></button><button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 bg-slate-50 text-slate-500 rounded-xl"><Bell size={20} />{stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-[8px] text-white font-black animate-bounce">{stats.lowStockCount}</span>)}</button><button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg"><Plus size={20} /></button></div>
       </header>
 
       <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
@@ -1198,7 +1220,7 @@ const App: React.FC = () => {
         <div className="max-w-6xl mx-auto w-full">
            {view === 'dashboard' && (
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
-                <h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>
+                <div className="flex justify-between items-center"><h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>{isSyncing && <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full animate-pulse border border-blue-100"><RefreshCw size={12} className="animate-spin"/><span className="text-[10px] font-black uppercase tracking-widest">Real-time Syncing...</span></div>}</div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
                   <div onClick={() => setView('patients')} className="bg-gradient-to-br from-indigo-600 to-blue-700 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-indigo-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group"><p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Patients</p><p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.totalPatients}<Users size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p></div>
                   <div onClick={() => setView('billing')} className="bg-gradient-to-br from-emerald-500 to-teal-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-emerald-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group"><p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Total Revenue</p><p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.collected.toLocaleString()}<TrendingUp size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p></div>
@@ -1243,10 +1265,6 @@ const App: React.FC = () => {
                              <p className="text-6xl md:text-7xl font-black text-white tracking-tighter tabular-nums select-all cursor-copy hover:scale-105 transition-transform" onClick={copySyncCode}>
                                {clinicSyncCode}
                              </p>
-                             <div className="flex gap-2 mt-2">
-                               <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black text-white/50 uppercase">Secured</span>
-                               <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black text-white/50 uppercase">API Linked</span>
-                             </div>
                           </div>
                           <button onClick={copySyncCode} className="flex items-center gap-3 px-8 py-4 bg-white text-indigo-950 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-blue-50 transition-all shadow-xl active:scale-95 group/btn">
                             <Copy size={18} className="text-blue-600 group-hover/btn:scale-110 transition-transform"/> Copy Clinic Code
@@ -1257,29 +1275,55 @@ const App: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="space-y-4 pt-4">
+                      <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 space-y-6">
+                        <div className="flex items-center justify-between">
+                           <div className="flex items-center gap-3">
+                              <Zap size={20} className={isAutoSyncEnabled ? "text-emerald-500" : "text-slate-300"} />
+                              <div>
+                                 <h4 className="font-black text-slate-800 text-sm">Real-time Auto Sync</h4>
+                                 <p className="text-[10px] text-slate-500">Backup automatically on every change</p>
+                              </div>
+                           </div>
+                           <button onClick={() => setIsAutoSyncEnabled(!isAutoSyncEnabled)} className="focus:outline-none">
+                              {isAutoSyncEnabled ? <ToggleOn size={32} className="text-emerald-500" /> : <Toggle size={32} className="text-slate-300" />}
+                           </button>
+                        </div>
+
+                        <div className="space-y-3 pt-2">
+                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                              <Globe2 size={14} className="text-blue-500" /> Custom API Endpoint (Your Hosting)
+                           </label>
+                           <input 
+                              type="text" 
+                              value={syncEndpoint} 
+                              onChange={(e) => setSyncEndpoint(e.target.value)} 
+                              placeholder="https://yourdomain.com/api/sync.php" 
+                              className="w-full p-4 rounded-xl border-2 border-slate-200 bg-white font-bold text-xs outline-none focus:border-blue-500 transition-all" 
+                           />
+                           <p className="text-[9px] text-slate-400 italic">Leave as default to use the standard cloud server.</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
                         <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                          <Link size={14} className="text-blue-500" /> Connect Secondary Device
+                          <Link size={14} className="text-blue-500" /> Pull Data from Another Device
                         </label>
                         <div className="flex gap-2">
                           <input 
                             type="text" 
                             value={joinCode} 
                             onChange={(e) => setJoinCode(e.target.value.toUpperCase())} 
-                            placeholder="Enter Code (e.g. SC-ABCD)" 
-                            className="flex-grow p-5 rounded-2xl border-2 border-slate-100 bg-white font-black text-base outline-none focus:border-blue-500 transition-all shadow-sm placeholder:text-slate-300 placeholder:font-bold" 
+                            placeholder="Enter Clinic Code" 
+                            className="flex-grow p-5 rounded-2xl border-2 border-slate-100 bg-white font-black text-base outline-none focus:border-blue-500 transition-all" 
                           />
                           <button 
                             onClick={() => handleCloudSync('restore')} 
                             disabled={!joinCode || isSyncing} 
-                            className="px-8 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-blue-600 disabled:opacity-20 shadow-lg shadow-slate-200 active:scale-95 transition-all"
+                            className="px-8 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-blue-600 disabled:opacity-20 shadow-lg"
                           >
-                            Pull Data
+                            Pull
                           </button>
                         </div>
-                        <p className="text-[10px] text-slate-400 italic px-2 flex items-center gap-2">
-                          <Info size={12}/> Linking a clinic will sync current local data with the global cloud state for that ID.
-                        </p>
                       </div>
                     </div>
                   </div>
@@ -1288,11 +1332,11 @@ const App: React.FC = () => {
                     <div className="space-y-8 flex-grow">
                       <div className="flex items-center gap-4">
                         <div className={`p-4 rounded-3xl ${isSyncing ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>
-                          {isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Zap size={32} />}
+                          {isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Database size={32} />}
                         </div>
                         <div>
                           <h2 className="text-2xl font-black text-slate-800">{isSyncing ? 'Sync in Progress' : 'Cloud Maintenance'}</h2>
-                          <p className="text-slate-500 text-sm font-medium">Backup your local records to our secure API cloud database.</p>
+                          <p className="text-slate-500 text-sm font-medium">Manage manual backups and restoration tasks.</p>
                         </div>
                       </div>
 
@@ -1305,20 +1349,9 @@ const App: React.FC = () => {
                              </div>
                              <div className="h-4 w-full bg-slate-200 rounded-full overflow-hidden p-1 shadow-inner">
                                 <div 
-                                  className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500 shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+                                  className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500" 
                                   style={{ width: `${syncProgress}%` }}
                                 />
-                             </div>
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                             <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col gap-1">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Transmission Protocol</span>
-                                <span className="text-xs font-black text-slate-700">HTTPS / REST API</span>
-                             </div>
-                             <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col gap-1">
-                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Encryption Layer</span>
-                                <span className="text-xs font-black text-slate-700">AES-256 Cloud</span>
                              </div>
                           </div>
                         </div>
@@ -1330,10 +1363,10 @@ const App: React.FC = () => {
                                  <p className="text-sm font-black text-slate-800">{lastSyncedAt || 'No History'}</p>
                               </div>
                               <div className="p-6 bg-white border border-slate-100 rounded-3xl space-y-2">
-                                 <p className="text-[10px] font-black uppercase text-slate-400">API Latency</p>
+                                 <p className="text-[10px] font-black uppercase text-slate-400">Status</p>
                                  <div className="flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                                    <p className="text-xs font-black text-slate-800 uppercase">Gateway Ready</p>
+                                    <span className={`w-2 h-2 rounded-full ${isAutoSyncEnabled ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-300'}`}></span>
+                                    <p className="text-xs font-black text-slate-800 uppercase">{isAutoSyncEnabled ? 'Real-time On' : 'Manual Only'}</p>
                                  </div>
                               </div>
                            </div>
@@ -1341,7 +1374,7 @@ const App: React.FC = () => {
                            <div className="p-6 bg-blue-50 border border-blue-100 rounded-3xl flex items-start gap-4">
                               <Info className="text-blue-500 shrink-0" size={20}/>
                               <p className="text-xs font-bold text-blue-800 leading-relaxed">
-                                 SmartClinic uses an automated API architecture. When you click "Push Data", your local storage is mirrored to our global redundant servers.
+                                 When "Auto Sync" is enabled, every patient record, clinical visit, and pharmacy sale is instantly mirrored to your hosting server.
                               </p>
                            </div>
                         </div>
@@ -1355,40 +1388,8 @@ const App: React.FC = () => {
                         className="flex items-center justify-center gap-3 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm transition-all active:scale-95 shadow-2xl shadow-blue-200 disabled:opacity-50"
                       >
                         {isSyncing ? <RefreshCw className="animate-spin" size={20}/> : <UploadCloud size={20} />}
-                        Push Local Records to Cloud
+                        Manual Push to Cloud
                       </button>
-                      <button 
-                        onClick={() => handleCloudSync('restore')} 
-                        disabled={isSyncing} 
-                        className="flex items-center justify-center gap-3 py-5 bg-white border-2 border-slate-200 text-slate-600 rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 disabled:opacity-50 hover:bg-slate-50"
-                      >
-                        {isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <DownloadCloud size={18} />}
-                        Request Cloud Mirror
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
-                    <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Smartphone size={24}/></div>
-                    <div>
-                      <h4 className="font-black text-slate-800 text-sm">Cross-Device Access</h4>
-                      <p className="text-[11px] text-slate-500 mt-1">Access your records on a tablet, mobile, or desktop by simply pulling the data with your Sync Code.</p>
-                    </div>
-                  </div>
-                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
-                    <div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600"><ShieldCheck size={24}/></div>
-                    <div>
-                      <h4 className="font-black text-slate-800 text-sm">Data Redundancy</h4>
-                      <p className="text-[11px] text-slate-500 mt-1">If your browser cache is cleared, your data is always safe on the API server for restoration.</p>
-                    </div>
-                  </div>
-                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
-                    <div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><Globe size={24}/></div>
-                    <div>
-                      <h4 className="font-black text-slate-800 text-sm">Real-time Gateway</h4>
-                      <p className="text-[11px] text-slate-500 mt-1">Optimized for low-bandwidth networks, ensuring clinical staff can sync data even on limited connections.</p>
                     </div>
                   </div>
                 </div>
@@ -1440,13 +1441,6 @@ const App: React.FC = () => {
                   {settingsTab !== 'appearance' && (
                     <div className="flex flex-col sm:flex-row gap-4">
                       <div className="relative flex-grow group"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} /><input type="text" placeholder={`Deep Search in ${settingsTab}...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold transition-all text-sm shadow-sm" />{settingsSearchTerm && <button onClick={() => setSettingsSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>}</div>
-                      {settingsTab === 'templates' && (
-                        <div className="flex bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
-                          {['All', 'Child', 'Adult', 'Senior'].map(filter => (
-                            <button key={filter} onClick={() => setTemplateAgeFilter(filter as any)} className={`px-4 py-1.5 rounded-lg text-[9px] font-black uppercase tracking-tighter transition-all ${templateAgeFilter === filter ? 'bg-white shadow text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>{filter}</button>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )}
                 </div>
@@ -1455,7 +1449,6 @@ const App: React.FC = () => {
                   {settingsTab === 'appearance' && (<div className="col-span-full bg-white p-8 md:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-10"><div className="flex items-center gap-4"><div className="p-4 bg-blue-50 text-blue-600 rounded-3xl"><Type size={32} /></div><div><h2 className="text-2xl font-black text-slate-800">Application Text Scale</h2><p className="text-slate-400 text-sm font-medium">Customize the global font size for better readability across all clinic modules.</p></div></div><div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[{ label: 'Small', size: 14 },{ label: 'Normal', size: 16 },{ label: 'Large', size: 18 },{ label: 'X-Large', size: 20 }].map((opt) => (<button key={opt.size} onClick={() => setFontSize(opt.size)} className={`p-8 rounded-[2rem] border-4 transition-all flex flex-col items-center gap-3 active:scale-95 ${fontSize === opt.size ? 'border-blue-600 bg-blue-50 text-blue-600 shadow-xl shadow-blue-100' : 'border-slate-50 bg-slate-50 text-slate-400 hover:border-slate-100'}`}><span className="font-black" style={{ fontSize: `${opt.size}px` }}>Aa</span><span className="text-[10px] font-black uppercase tracking-widest">{opt.label}</span></button>))}</div><div className="p-6 bg-slate-50 rounded-2xl border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Live Preview Area:</p><p className="font-medium text-slate-700">یہاں اردو اور انگریزی متن کا نمونہ دکھایا گیا ہے۔ منتخب کردہ سائز کے مطابق یہ متن تبدیل ہوگا۔</p><p className="text-xs text-slate-400 italic mt-2">Changes are applied immediately and saved to your browser's local storage.</p></div></div>)}
                   {settingsTab !== 'low_stock' && settingsTab !== 'appearance' && (<button onClick={() => { if(settingsTab === 'templates') setShowTemplateForm(true); else if(settingsTab === 'symptoms') setShowSymptomForm(true); else if(settingsTab === 'scientific') setShowScientificForm(true); else if(settingsTab === 'companies') setShowCompanyForm(true); else if(settingsTab === 'med_categories') setShowCategoryForm(true); else if(settingsTab === 'med_types') setShowTypeForm(true); else if(settingsTab === 'vitals') setShowVitalDefForm(true); else if(settingsTab === 'meds') setShowMedForm(true); }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]"><Plus size={32} /><span className="font-black uppercase tracking-widest text-[9px]">Add New</span></button>)}
                   {settingsTab !== 'appearance' && filteredSettingsItems.map(item => { const brands = (settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') ? (settingsTab === 'scientific' ? getBrandsForScientific(item.label) : settingsTab === 'companies' ? getBrandsForCompany(item.label) : settingsTab === 'med_categories' ? getBrandsForCategory(item.label) : getBrandsForType(item.label)) : []; const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock'; const med = item as Medication; const tpl = settingsTab === 'templates' ? item as PrescriptionTemplate : null; return (<div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}><div><div className="flex justify-between items-start gap-2"><h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}</h3>{tpl && (tpl.minAge !== undefined || tpl.maxAge !== undefined) && (<span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[8px] font-black uppercase whitespace-nowrap">Age: {tpl.minAge || 0}-{tpl.maxAge || 120}Y</span>)}</div>{(item.diagnosis || item.scientificName) && (<p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}{isMedLike && med.category && ` • ${med.category}`}{isMedLike && med.type && ` • ${med.type}`}</p>)}{brands.length > 0 && (<div className="mt-3"><p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Registered Medicines</p><div className="flex flex-wrap gap-1">{brands.map((b, idx) => (<span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>))}</div></div>)}{isMedLike && (<div className="mt-3 space-y-1"><p className={`text-[9px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-600' : 'text-slate-500'}`}>Current Stock: {med.stock} {med.unit}</p><p className="text-[8px] font-bold text-slate-400 uppercase">Alert Level: {med.reorderLevel}</p>{med.stock <= med.reorderLevel && (<div className="mt-2 flex items-center gap-1.5 text-rose-500 animate-pulse"><AlertTriangle size={10} /><span className="text-[8px] font-black uppercase">Low Stock Critical</span></div>)}</div>)}</div><div className="mt-4 pt-3 border-t flex justify-end gap-1"><button onClick={() => { if(settingsTab === 'templates') { setEditingTemplate(item); setTempPrescribedMeds(item.prescribedMeds); setFormDiagnosis(item.diagnosis); setShowTemplateForm(true); } else if(settingsTab === 'symptoms') { setEditingSymptom(item); setShowSymptomForm(true); } else if(settingsTab === 'scientific') { setEditingScientificName(item); setShowScientificForm(true); } else if(settingsTab === 'companies') { setEditingCompanyName(item); setShowCompanyForm(true); } else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); } else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); } else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); } else if(isMedLike) { setEditingMedication(med); setShowMedForm(true); } }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button><button onClick={() => { if(settingsTab === 'templates') setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'symptoms') setSymptoms(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'scientific') setScientificNames(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'companies') setCompanyNames(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'med_categories') setMedCategories(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'med_types') setMedTypes(prev => prev.filter(i => i.id !== item.id)); else if(settingsTab === 'vitals') setVitalDefinitions(prev => prev.filter(i => i.id !== item.id)); else if(isMedLike) setMedications(prev => prev.filter(i => i.id !== item.id)); }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button></div></div>)})}
-                  {settingsTab === 'low_stock' && filteredSettingsItems.length === 0 && (<div className="col-span-full py-20 text-center bg-white rounded-[3rem] border-2 border-dashed border-slate-100 flex flex-col items-center gap-4"><Inbox size={48} className="text-slate-100" /><p className="text-slate-400 font-bold uppercase text-xs">No items currently below reorder levels</p></div>)}
                 </div>
              </div>
            )}
@@ -1520,7 +1513,6 @@ const App: React.FC = () => {
                           const val = e.target.value;
                           setPatientFormSearch(val); 
                           setShowPatientResults(true); 
-                          // DYNAMIC RESET: Clear selection if text deviates, making template filter reactive to typing
                           if (selectedPatientInForm && val !== selectedPatientInForm.name) {
                              setFormSelectedPatientId(null);
                           }
@@ -1571,18 +1563,9 @@ const App: React.FC = () => {
                         <button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className="group px-4 py-2 bg-white border border-indigo-100 rounded-xl text-[10px] font-black text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-2 whitespace-nowrap shadow-sm hover:shadow-md">
                           {isChild ? <Baby size={12}/> : isSenior ? <Accessibility size={12}/> : <Accessibility size={12} className="opacity-40"/>}
                           {tpl.name}
-                          {tpl.minAge !== undefined && <span className="text-[8px] opacity-60 font-bold ml-1">{tpl.minAge}-{tpl.maxAge}Y</span>}
                         </button>
                       );
                     })}
-                    {ageRelevantTemplates.length === 0 && prescriptionTemplates.length > 0 && (
-                      <p className="text-[10px] text-rose-400 font-bold uppercase flex items-center gap-2">
-                         <AlertCircle size={12}/> No specific protocols found for this age.
-                      </p>
-                    )}
-                    {prescriptionTemplates.length === 0 && (
-                       <p className="text-[10px] text-slate-300 font-bold uppercase">No templates defined in settings.</p>
-                    )}
                   </div>
                 </div>
 
@@ -1599,8 +1582,7 @@ const App: React.FC = () => {
                         const isSearching = activeMedSearchIndex === idx; 
                         const filteredMedsList = medications.filter(m => m.brandName.toLowerCase().includes((pm.searchTerm || '').toLowerCase()) || m.scientificName.toLowerCase().includes((pm.searchTerm || '').toLowerCase())); 
                         const isAllergic = checkMedAllergy(pm);
-                        return (<div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all ${isAllergic ? 'border-red-500 bg-red-50 shadow-red-100' : 'border-slate-100 shadow-sm'}`}>{isAllergic && (<div className="flex items-center gap-2 text-red-600 font-black text-[9px] md:text-[10px] uppercase animate-pulse"><ShieldAlert size={14} /> Allergy Risk Detected!</div>)}<div className="flex items-center gap-3"><div className="flex-grow relative group"><input type="text" placeholder="Search inventory..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || pm.customName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; if (newList[idx].medicationId) { newList[idx].medicationId = ''; } setTempPrescribedMeds(newList); }} className="w-full pr-8 font-black text-xs outline-none bg-transparent" />{(pm.searchTerm || selectedMed?.brandName || pm.customName) && (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = ''; newList[idx].medicationId = ''; newList[idx].customName = ''; setTempPrescribedMeds(newList); }} className="absolute right-0 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>)}{isSearching && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">{filteredMedsList.length > 0 ? (filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].customName = undefined; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate">{m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span></button>))) : pm.searchTerm?.trim() ? (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].customName = pm.searchTerm; newList[idx].medicationId = ''; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"><Plus size={12} /> Add "{pm.searchTerm}" as non-listed</button>) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}</div>)}</div><button type="button" onClick={() => { const newList = tempPrescribedMeds.filter((_, i) => i !== idx); setTempPrescribedMeds(newList); }} className="text-slate-300"><Trash2 size={14}/></button></div><div className="flex gap-2 items-center">{!selectedMed && pm.customName && (<span className="text-[8px] font-black uppercase text-blue-400 bg-blue-50 px-2 py-0.5 rounded-full">Custom Med</span>)}<div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div></div></div>); })}
-                      {tempPrescribedMeds.length === 0 && (<div className="py-6 border-2 border-dashed border-slate-100 rounded-2xl text-center text-slate-300 font-black uppercase text-[9px]">No medications added</div>)}
+                        return (<div key={idx} className={`relative bg-white p-4 rounded-xl border-2 flex flex-col gap-3 transition-all ${isAllergic ? 'border-red-500 bg-red-50 shadow-red-100' : 'border-slate-100 shadow-sm'}`}>{isAllergic && (<div className="flex items-center gap-2 text-red-600 font-black text-[9px] md:text-[10px] uppercase animate-pulse"><ShieldAlert size={14} /> Allergy Risk Detected!</div>)}<div className="flex items-center gap-3"><div className="flex-grow relative group"><input type="text" placeholder="Search inventory..." value={pm.searchTerm !== undefined ? pm.searchTerm : (selectedMed?.brandName || pm.customName || '')} onFocus={() => { setActiveMedSearchIndex(idx); const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = selectedMed?.brandName || pm.customName || ''; setTempPrescribedMeds(newList); }} onChange={(e) => { const newList = [...tempPrescribedMeds]; newList[idx].searchTerm = e.target.value; if (newList[idx].medicationId) { newList[idx].medicationId = ''; } setTempPrescribedMeds(newList); }} className="w-full pr-8 font-black text-xs outline-none bg-transparent" />{isSearching && (<div className="absolute left-0 right-0 top-full mt-2 bg-white border border-slate-200 shadow-2xl rounded-2xl z-[400] max-h-40 overflow-y-auto">{filteredMedsList.length > 0 ? (filteredMedsList.map(m => (<button key={m.id} type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].medicationId = m.id; newList[idx].customName = undefined; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-2.5 hover:bg-blue-50 border-b border-slate-50 font-black text-[10px] truncate">{m.brandName} <span className="text-[8px] text-slate-400 font-bold uppercase ml-1">({m.scientificName})</span></button>))) : pm.searchTerm?.trim() ? (<button type="button" onClick={() => { const newList = [...tempPrescribedMeds]; newList[idx].customName = pm.searchTerm; newList[idx].medicationId = ''; newList[idx].searchTerm = undefined; setTempPrescribedMeds(newList); setActiveMedSearchIndex(null); }} className="w-full text-left px-4 py-3 bg-blue-50/50 hover:bg-blue-50 font-black text-[9px] uppercase text-blue-600 flex items-center gap-2"><Plus size={12} /> Add "{pm.searchTerm}"</button>) : (<div className="p-3 text-slate-300 text-[9px] uppercase text-center">No Match</div>)}</div>)}</div><button type="button" onClick={() => { const newList = tempPrescribedMeds.filter((_, i) => i !== idx); setTempPrescribedMeds(newList); }} className="text-slate-300"><Trash2 size={14}/></button></div><div className="flex gap-2 items-center"><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Qty</div><input type="number" value={pm.quantity || ''} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].quantity = parseInt(e.target.value) || 0; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div><div className="flex-grow"><div className="text-[9px] font-black text-slate-400 uppercase">Dosage</div><input value={pm.dosage} onChange={e => { const nl = [...tempPrescribedMeds]; nl[idx].dosage = e.target.value; setTempPrescribedMeds(nl); }} className="w-full font-black text-sm outline-none bg-slate-50 border-b-2 border-slate-200 p-1.5 rounded-lg focus:border-blue-500" /></div></div></div>); })}
                     </div>
                   </div>
                 </div>
