@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -1234,30 +1235,6 @@ const App: React.FC = () => {
     return false;
   };
 
-  const getBrandsForScientific = (scientificLabel: string) => {
-    return medications
-      .filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase())
-      .map(m => m.brandName);
-  };
-
-  const getBrandsForCompany = (companyLabel: string) => {
-    return medications
-      .filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase())
-      .map(m => m.brandName);
-  };
-
-  const getBrandsForCategory = (categoryLabel: string) => {
-    return medications
-      .filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase())
-      .map(m => m.brandName);
-  };
-
-  const getBrandsForType = (typeLabel: string) => {
-    return medications
-      .filter(m => m.type.toLowerCase() === typeLabel.toLowerCase())
-      .map(m => m.brandName);
-  };
-
   const launchEncounter = (p: Patient) => {
     setFormSelectedPatientId(p.id);
     setPatientFormSearch(p.name);
@@ -1347,6 +1324,30 @@ const App: React.FC = () => {
     });
   }, [selectedPatientInForm, prescriptionTemplates]);
 
+  const getBrandsForScientific = (scientificLabel: string) => {
+    return medications
+      .filter(m => m.scientificName.toLowerCase() === scientificLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
+  const getBrandsForCompany = (companyLabel: string) => {
+    return medications
+      .filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
+  const getBrandsForCategory = (categoryLabel: string) => {
+    return medications
+      .filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
+  const getBrandsForType = (typeLabel: string) => {
+    return medications
+      .filter(m => m.type.toLowerCase() === typeLabel.toLowerCase())
+      .map(m => m.brandName);
+  };
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       {/* Mobile Top Header */}
@@ -1358,9 +1359,10 @@ const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <button 
             onClick={() => setView('sync')}
-            className={`p-2 rounded-xl transition-colors ${view === 'sync' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'}`}
+            className={`p-2 rounded-xl transition-colors relative ${view === 'sync' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'}`}
           >
             <Cloud size={20} />
+            <span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span>
           </button>
           <button 
             onClick={() => setShowNotifications(!showNotifications)}
@@ -1391,6 +1393,7 @@ const App: React.FC = () => {
                title="Cloud Sync"
              >
                <Cloud size={22} />
+               <span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-slate-50 ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span>
              </button>
              <button 
                onClick={() => setShowNotifications(!showNotifications)}
@@ -1435,7 +1438,7 @@ const App: React.FC = () => {
              )}
            </div>
         </div>
-        <nav className="flex flex-col gap-3 flex-grow">
+        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2">
           <SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} />
           <SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} />
           <SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} />
@@ -1445,6 +1448,25 @@ const App: React.FC = () => {
           <SidebarItem icon={<Cloud size={24} />} label="Cloud Sync" active={view === 'sync'} onClick={() => setView('sync')} />
           <SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
         </nav>
+
+        {/* Sync Indicator at Sidebar Bottom */}
+        <div className="mt-auto pt-6 border-t border-slate-200">
+           <div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-2">
+              <div className="flex items-center justify-between">
+                 <p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Network Logic</p>
+                 <div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></div>
+              </div>
+              <div className="flex items-center gap-2">
+                 <RefreshCw size={12} className={`text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} />
+                 <span className="text-[10px] font-black text-slate-700 uppercase tracking-tighter">
+                   {isSyncing ? 'Syncing...' : syncStatus === 'error' ? 'Sync Error' : syncStatus === 'success' ? 'Cloud Connected' : 'Local Storage'}
+                 </span>
+              </div>
+              {lastSyncedAt && (
+                <p className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">Updated: {lastSyncedAt}</p>
+              )}
+           </div>
+        </div>
       </aside>
 
       {/* Main Content Area */}
@@ -1761,89 +1783,89 @@ const App: React.FC = () => {
            )}
 
            {view === 'patients' && (
-             <div className="space-y-6 animate-in fade-in">
-               <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
-                 <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Patient Files</h1>
-                 <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
-                    <div className="flex gap-1 shrink-0">
-                       <button onClick={exportPatientsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export to Excel (CSV)"><FileDown size={18} /></button>
-                       <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import from Excel (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportPatientsCsv} /></label>
+              <div className="space-y-6 md:space-y-8 animate-in fade-in">
+                 <div className="flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <h1 className="text-2xl md:text-3xl font-black text-slate-800 w-full text-left">Patient Files</h1>
+                    <div className="flex items-center gap-2 md:gap-4 w-full sm:w-auto">
+                       <div className="flex gap-1 shrink-0">
+                          <button onClick={exportPatientsCsv} className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all" title="Export to Excel (CSV)"><FileDown size={18} /></button>
+                          <label className="p-2.5 md:p-3 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl md:rounded-2xl shadow-sm transition-all cursor-pointer" title="Import from Excel (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportPatientsCsv} /></label>
+                       </div>
+                       <div className="relative flex-grow sm:w-64 group">
+                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
+                         <input type="text" placeholder="Search: Name, Phone, Reg#, History, Diagnosis..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
+                         {patientSearchTerm && <button onClick={() => setPatientSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
+                       </div>
+                       <button onClick={() => { setEditingPatient(null); setSelectedAllergies([]); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
                     </div>
-                    <div className="relative flex-grow sm:w-64 group">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={18} />
-                      <input type="text" placeholder="Search: Name, Phone, Reg#, History, Diagnosis..." value={patientSearchTerm} onChange={(e) => setPatientSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 md:py-3 rounded-xl md:rounded-2xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold text-sm transition-all shadow-sm" />
-                      {patientSearchTerm && <button onClick={() => setPatientSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={16}/></button>}
-                    </div>
-                    <button onClick={() => { setEditingPatient(null); setSelectedAllergies([]); setShowPatientForm(true); }} className="bg-blue-600 text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl md:rounded-2xl font-black shadow-lg whitespace-nowrap text-sm">Register</button>
                  </div>
-               </div>
-               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
-                 {filteredPatients.map(p => {
-                    const patientVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-                    const lastVisit = patientVisits[0];
+                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+                    {filteredPatients.map(p => {
+                       const patientVisits = visits.filter(v => v.patientId === p.id).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+                       const lastVisit = patientVisits[0];
 
-                    return (
-                   <div key={p.id} onClick={() => { setSelectedPatientId(p.id); setView('patient-detail'); setDetailTab('history'); setHistorySearchTerm(''); }} className="bg-white p-5 md:p-6 rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all group relative flex flex-col justify-between min-h-[140px]">
-                     <div>
-                       <div className="flex items-center gap-4">
-                         <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-black shrink-0">{p.name[0]}</div>
-                         <div className="flex-grow min-w-0">
-                           <div className="flex items-center gap-2">
-                             <h3 className="font-black text-slate-800 truncate text-base">{p.name}</h3>
-                           </div>
-                           <p className="text-[11px] text-blue-600 font-bold leading-tight">{p.phone}</p>
-                           {p.allergies && (
-                             <p className="text-[10px] text-rose-500 font-bold truncate leading-tight mt-0.5">Allergy: {p.allergies}</p>
-                           )}
-                           <p className="text-[9px] text-slate-400 font-bold uppercase truncate mt-1">{p.patientCode} • {p.age}Y</p>
-                         </div>
-                       </div>
-                       
-                       <div className="mt-4 flex flex-col gap-1.5">
-                         {lastVisit ? (
-                           <>
-                             <div className="flex items-center gap-2 text-slate-500">
-                               <Calendar size={12} className="text-blue-400" />
-                               <p className="text-[10px] md:text-[11px] font-bold">Last Visit: <span className="text-slate-700">{formatDate(lastVisit.date)}</span></p>
-                             </div>
-                             {lastVisit.vitals && Object.keys(lastVisit.vitals).length > 0 && (
-                               <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
-                                 <Activity size={10} className="text-emerald-500 shrink-0" />
-                                 <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-tighter">
-                                   {vitalDefinitions
-                                     .map(vd => lastVisit.vitals![vd.id] ? `${vd.label}: ${lastVisit.vitals![vd.id]}${vd.unit}` : null)
-                                     .filter(Boolean)
-                                     .join(' • ')}
-                                 </p>
-                               </div>
-                             )}
-                           </>
-                         ) : (
-                           <p className="text-[10px] md:text-[11px] text-slate-300 italic font-medium">No visits recorded yet</p>
-                         )}
-                       </div>
-                     </div>
+                       return (
+                      <div key={p.id} onClick={() => { setSelectedPatientId(p.id); setView('patient-detail'); setDetailTab('history'); setHistorySearchTerm(''); }} className="bg-white p-5 md:p-6 rounded-3xl md:rounded-[2rem] border border-slate-100 shadow-sm cursor-pointer hover:shadow-md transition-all group relative flex flex-col justify-between min-h-[140px]">
+                        <div>
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 md:w-12 md:h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 font-black shrink-0">{p.name[0]}</div>
+                            <div className="flex-grow min-w-0">
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-black text-slate-800 truncate text-base">{p.name}</h3>
+                              </div>
+                              <p className="text-[11px] text-blue-600 font-bold leading-tight">{p.phone}</p>
+                              {p.allergies && (
+                                <p className="text-[10px] text-rose-500 font-bold truncate leading-tight mt-0.5">Allergy: {p.allergies}</p>
+                              )}
+                              <p className="text-[9px] text-slate-400 font-bold uppercase truncate mt-1">{p.patientCode} • {p.age}Y</p>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-4 flex flex-col gap-1.5">
+                            {lastVisit ? (
+                              <>
+                                <div className="flex items-center gap-2 text-slate-500">
+                                  <Calendar size={12} className="text-blue-400" />
+                                  <p className="text-[10px] md:text-[11px] font-bold">Last Visit: <span className="text-slate-700">{formatDate(lastVisit.date)}</span></p>
+                                </div>
+                                {lastVisit.vitals && Object.keys(lastVisit.vitals).length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                                    <Activity size={10} className="text-emerald-500 shrink-0" />
+                                    <p className="text-[9px] md:text-[10px] font-black text-slate-500 uppercase tracking-tighter">
+                                      {vitalDefinitions
+                                        .map(vd => lastVisit.vitals![vd.id] ? `${vd.label}: ${lastVisit.vitals![vd.id]}${vd.unit}` : null)
+                                        .filter(Boolean)
+                                        .join(' • ')}
+                                    </p>
+                                  </div>
+                                )}
+                              </>
+                            ) : (
+                              <p className="text-[10px] md:text-[11px] text-slate-300 italic font-medium">No visits recorded yet</p>
+                            )}
+                          </div>
+                        </div>
 
-                     <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
-                       <div className="flex gap-1">
-                          <button onClick={(e) => { e.stopPropagation(); launchEncounter(p); }} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Start Log Visit"><Stethoscope size={18} /></button>
-                          <button onClick={(e) => { e.stopPropagation(); setEditingPatient(p); setSelectedAllergies(p.allergies ? p.allergies.split(', ').filter(Boolean) : []); setShowPatientForm(true); }} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={16} /></button>
-                          <button onClick={(e) => { e.stopPropagation(); handleDeletePatient(p.id); }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
-                       </div>
-                       {lastVisit && (
-                         <button 
-                           onClick={(e) => { e.stopPropagation(); setQrVisit(lastVisit); }} 
-                           className="bg-indigo-50 text-indigo-600 p-2 md:p-2.5 rounded-lg md:rounded-xl hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-2 group/qr"
-                         >
-                           <QrCode size={18} />
-                           <span className="text-[9px] font-black uppercase tracking-tighter hidden sm:block">Visit QR</span>
-                         </button>
-                       )}
-                     </div>
-                   </div>
-                 )})}
-               </div>
-             </div>
+                        <div className="mt-4 pt-4 border-t border-slate-50 flex items-center justify-between">
+                          <div className="flex gap-1">
+                             <button onClick={(e) => { e.stopPropagation(); launchEncounter(p); }} className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors" title="Start Log Visit"><Stethoscope size={18} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); setEditingPatient(p); setSelectedAllergies(p.allergies ? p.allergies.split(', ').filter(Boolean) : []); setShowPatientForm(true); }} className="p-2 text-slate-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"><Edit2 size={16} /></button>
+                             <button onClick={(e) => { e.stopPropagation(); handleDeletePatient(p.id); }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                          </div>
+                          {lastVisit && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); setQrVisit(lastVisit); }} 
+                              className="bg-indigo-50 text-indigo-600 p-2 md:p-2.5 rounded-lg md:rounded-xl hover:bg-indigo-100 transition-all shadow-sm flex items-center gap-2 group/qr"
+                            >
+                              <QrCode size={18} />
+                              <span className="text-[9px] font-black uppercase tracking-tighter hidden sm:block">Visit QR</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )})}
+                 </div>
+              </div>
            )}
 
            {view === 'patient-detail' && selectedPatientId && (
@@ -2649,15 +2671,11 @@ const App: React.FC = () => {
                        <tbody className="divide-y divide-slate-50">
                           {selectedSaleForReceipt.items.map((item, idx) => {
                              const med = medications.find(m => m.id === item.medicationId);
-                             const isRisk = checkPharmacyMedAllergy(item.medicationId, selectedSaleForReceipt.customerName);
                              return (
-                               <tr key={idx} className={`text-xs ${isRisk ? 'bg-red-50' : ''}`}>
+                               <tr key={idx} className="text-xs">
                                   <td className="py-4">
                                      <p className="font-black text-slate-800">{med?.brandName || 'Unknown Med'}</p>
                                      <p className="text-[9px] font-bold text-slate-400 italic">({med?.scientificName}) - {med?.strength}</p>
-                                     {isRisk && (
-                                       <p className="text-[8px] font-black text-red-600 uppercase mt-1 flex items-center gap-1"><ShieldAlert size={10}/> Allergy Warning Detected</p>
-                                     )}
                                   </td>
                                   <td className="py-4 text-center font-black text-slate-600">{item.quantity}</td>
                                   <td className="py-4 text-right font-black text-slate-800">{CURRENCY} {(item.quantity * item.priceAtTime).toLocaleString()}</td>
@@ -3038,24 +3056,6 @@ const App: React.FC = () => {
                           </div>
                         );
                       }
-                      if (v.label.toUpperCase() === 'TEMP') {
-                        return (
-                          <div key={v.id} className="relative">
-                            <input 
-                              type="number" 
-                              step="0.1"
-                              min="98"
-                              max="105"
-                              name={`vital_${v.id}`} 
-                              defaultValue={editingVisit?.vitals?.[v.id]} 
-                              placeholder={v.label} 
-                              className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs shadow-sm bg-white" 
-                            />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-black text-slate-300 uppercase pointer-events-none">{v.unit}</span>
-                            <div className="absolute -top-2 left-3 bg-white px-1 rounded text-[8px] font-black text-emerald-500 uppercase tracking-tighter">98-105 range</div>
-                          </div>
-                        );
-                      }
                       return (
                         <div key={v.id} className="relative">
                           <input type="text" name={`vital_${v.id}`} defaultValue={editingVisit?.vitals?.[v.id]} placeholder={v.label} className="w-full pl-3 pr-10 py-3 rounded-xl border-2 border-slate-100 font-black focus:border-emerald-500 outline-none text-xs" />
@@ -3345,12 +3345,10 @@ const App: React.FC = () => {
                   <tbody>
                     {selectedSaleForReceipt.items.map((item, idx) => {
                       const med = medications.find(m => m.id === item.medicationId);
-                      const isRisk = checkPharmacyMedAllergy(item.medicationId, selectedSaleForReceipt.customerName);
                       return (
-                        <tr key={idx} className={isRisk ? "font-bold text-red-600" : ""}>
+                        <tr key={idx}>
                           <td className="py-1">
                             {med?.brandName} ({med?.scientificName})
-                            {isRisk && <p className="text-[9px] uppercase">! Allergy Alert</p>}
                           </td>
                           <td className="py-1 text-center">{item.quantity}</td>
                           <td className="py-1 text-right">{CURRENCY} {(item.quantity * item.priceAtTime).toLocaleString()}</td>
