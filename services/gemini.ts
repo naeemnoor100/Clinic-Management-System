@@ -1,10 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import { Patient, Visit, Medication } from "../types";
 
-// Always use a named parameter and direct process.env.API_KEY reference
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 export const getPatientHistorySummary = async (patient: Patient, visits: Visit[], medications: Medication[]) => {
+  // Added comment: Create a new GoogleGenAI instance right before making an API call to ensure it always uses the most up-to-date API key
+  // Always use a named parameter and direct process.env.API_KEY reference
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const model = 'gemini-3-flash-preview';
   
   const visitContext = visits.map(v => {

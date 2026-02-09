@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
   Users, 
@@ -120,18 +119,22 @@ const dummyScientificNames: ScientificName[] = [
 const dummyTemplates: PrescriptionTemplate[] = [
   {
     id: 'tpl1',
-    name: 'Common Flu',
-    diagnosis: 'Seasonal Viral Influenza',
+    name: 'Adult Flu Protocol',
+    diagnosis: 'Seasonal Viral Influenza (Adult)',
+    minAge: 18,
+    maxAge: 100,
     prescribedMeds: [
       { medicationId: 'm1', dosage: '500mg', frequency: 'TDS', duration: '3 Days', quantity: 10 }
     ]
   },
   {
     id: 'tpl2',
-    name: 'Urgent Antibiotic Course',
-    diagnosis: 'Acute Bacterial Infection',
+    name: 'Pediatric Fever',
+    diagnosis: 'Viral Fever (Child)',
+    minAge: 0,
+    maxAge: 12,
     prescribedMeds: [
-      { medicationId: 'm2', dosage: '250mg', frequency: 'BD', duration: '5 Days', quantity: 10 }
+      { medicationId: 'm5', dosage: '5ml', frequency: 'BD', duration: '5 Days', quantity: 1 }
     ]
   }
 ];
@@ -475,6 +478,25 @@ const App: React.FC = () => {
       alert(e instanceof Error ? e.message : "Online synchronization failed. Check your internet connection.");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleAiSummary = async (patientId: string) => {
+    const patient = patients.find(p => p.id === patientId);
+    if (!patient) return;
+
+    setIsSummarizing(true);
+    setAiSummary("Gemini AI is analyzing patient clinical history...");
+
+    try {
+      const patientVisits = visits.filter(v => v.patientId === patientId);
+      const summary = await getPatientHistorySummary(patient, patientVisits, medications);
+      setAiSummary(summary || "No clinical summary could be generated.");
+    } catch (error) {
+      console.error("AI Summary Error:", error);
+      setAiSummary("Failed to generate clinical summary.");
+    } finally {
+      setIsSummarizing(false);
     }
   };
 
@@ -953,21 +975,6 @@ const App: React.FC = () => {
     setTempPrescribedMeds(tpl.prescribedMeds.map(pm => ({ ...pm, searchTerm: undefined })));
   };
 
-  const handleAiSummary = async (patientId: string) => {
-    const p = patients.find(pat => pat.id === patientId);
-    if (!p) return;
-    setIsSummarizing(true);
-    setAiSummary(null);
-    try {
-      const summary = await getPatientHistorySummary(p, visits.filter(v => v.patientId === patientId), medications);
-      setAiSummary(summary || "No history available.");
-    } catch (e) {
-      setAiSummary("Error generating analysis.");
-    } finally {
-      setIsSummarizing(false);
-    }
-  };
-
   const handleDeletePatient = (patientId: string) => {
     if (window.confirm("Are you sure you want to delete this patient and all their clinical records?")) {
       setPatients(prev => prev.filter(p => p.id !== patientId));
@@ -1328,6 +1335,17 @@ const App: React.FC = () => {
   const cartQuantityTotal = useMemo(() => {
     return cart.reduce((sum, item) => sum + item.quantity, 0);
   }, [cart]);
+
+  // Filtering templates based on patient age for the clinical encounter
+  const ageRelevantTemplates = useMemo(() => {
+    if (!selectedPatientInForm) return prescriptionTemplates;
+    const patientAge = selectedPatientInForm.age;
+    return prescriptionTemplates.filter(tpl => {
+      const min = tpl.minAge ?? 0;
+      const max = tpl.maxAge ?? 120;
+      return patientAge >= min && patientAge <= max;
+    });
+  }, [selectedPatientInForm, prescriptionTemplates]);
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
@@ -2489,13 +2507,19 @@ const App: React.FC = () => {
                     
                     const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock';
                     const med = item as Medication;
+                    const tpl = settingsTab === 'templates' ? item as PrescriptionTemplate : null;
 
                     return (
                     <div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}>
                       <div>
-                        <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">
-                          {item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}
-                        </h3>
+                        <div className="flex justify-between items-start gap-2">
+                          <h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">
+                            {item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}
+                          </h3>
+                          {tpl && (tpl.minAge !== undefined || tpl.maxAge !== undefined) && (
+                            <span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[8px] font-black uppercase whitespace-nowrap">Age: {tpl.minAge || 0}-{tpl.maxAge || 120}Y</span>
+                          )}
+                        </div>
                         {(item.diagnosis || item.scientificName) && (
                           <p className="text-[10px] text-slate-400 italic mt-1 truncate">
                             {item.diagnosis || item.scientificName}
@@ -2586,10 +2610,7 @@ const App: React.FC = () => {
         </button>
       </nav>
 
-      {/* --- Modals (Existing forms omitted for brevity but preserved in local state) --- */}
-      {/* (All modals remain unchanged as per your request not to touch existing functionality) */}
-      
-      {/* ... Placeholder for existing modals to keep logic intact ... */}
+      {/* --- Modals --- */}
       {selectedSaleForReceipt && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[700] flex items-center justify-center p-0 sm:p-4 animate-in zoom-in" onClick={() => setSelectedSaleForReceipt(null)}>
            <div className="bg-white w-full h-full sm:h-auto sm:max-w-2xl sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -2711,6 +2732,8 @@ const App: React.FC = () => {
                e.preventDefault();
                const f = new FormData(e.currentTarget);
                const name = f.get('tplName') as string;
+               const minAge = parseInt(f.get('minAge') as string) || 0;
+               const maxAge = parseInt(f.get('maxAge') as string) || 120;
                const finalPrescribedMeds = tempPrescribedMeds
                  .map(({searchTerm, ...rest}) => {
                     if (!rest.medicationId && searchTerm) return { ...rest, customName: searchTerm };
@@ -2722,7 +2745,9 @@ const App: React.FC = () => {
                  id: editingTemplate ? editingTemplate.id : Math.random().toString(36).substr(2, 9),
                  name, 
                  diagnosis: formDiagnosis, 
-                 prescribedMeds: finalPrescribedMeds
+                 prescribedMeds: finalPrescribedMeds,
+                 minAge,
+                 maxAge
                };
 
                if (editingTemplate) setPrescriptionTemplates(prev => prev.map(i => i.id === editingTemplate.id ? d : i));
@@ -2734,6 +2759,10 @@ const App: React.FC = () => {
                setFormDiagnosis('');
              }} className="p-6 md:p-8 space-y-6 flex-grow overflow-y-auto custom-scrollbar">
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Template Name</label><input required name="tplName" defaultValue={editingTemplate?.name} placeholder="e.g. Cough & Flu" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                <div className="grid grid-cols-2 gap-4">
+                   <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Min Age (Years)</label><input type="number" name="minAge" defaultValue={editingTemplate?.minAge || 0} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                   <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Max Age (Years)</label><input type="number" name="maxAge" defaultValue={editingTemplate?.maxAge || 120} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
+                </div>
                 <div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Diagnosis</label><input name="diagnosis" value={formDiagnosis} onChange={e => setFormDiagnosis(e.target.value)} placeholder="Default diagnosis" className="w-full p-4 rounded-xl md:rounded-2xl border-2 border-slate-100 bg-slate-50 font-black text-sm" /></div>
                 
                 <div className="space-y-4">
@@ -3038,10 +3067,12 @@ const App: React.FC = () => {
                 </div>
                 
                 <div className="bg-indigo-50/40 p-5 rounded-[2rem] border-2 border-indigo-100/50 space-y-4">
-                  <div className="flex justify-between items-center"><h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><LayoutTemplate size={14}/> Templates</h3></div>
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-widest flex items-center gap-2"><LayoutTemplate size={14}/> {selectedPatientInForm ? `Templates for ${selectedPatientInForm.age}Y` : 'Templates'}</h3>
+                  </div>
                   <div className="flex flex-wrap gap-2">
-                    {prescriptionTemplates.map(tpl => (<button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className="px-3 py-1.5 bg-white border border-indigo-100 rounded-lg text-[10px] font-bold text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap"><Copy size={10}/> {tpl.name}</button>))}
-                    {prescriptionTemplates.length === 0 && <p className="text-[10px] text-slate-300 font-bold uppercase">No templates</p>}
+                    {ageRelevantTemplates.map(tpl => (<button key={tpl.id} type="button" onClick={() => applyTemplate(tpl.id)} className="px-3 py-1.5 bg-white border border-indigo-100 rounded-lg text-[10px] font-bold text-indigo-600 hover:bg-indigo-600 hover:text-white transition-all flex items-center gap-1.5 whitespace-nowrap"><Copy size={10}/> {tpl.name}</button>))}
+                    {ageRelevantTemplates.length === 0 && <p className="text-[10px] text-slate-300 font-bold uppercase">No matching templates found for this age</p>}
                   </div>
                 </div>
 

@@ -58,6 +58,8 @@ export interface PrescriptionTemplate {
   name: string;
   diagnosis: string;
   prescribedMeds: PrescribedMed[];
+  minAge?: number;
+  maxAge?: number;
 }
 
 export interface Visit {
