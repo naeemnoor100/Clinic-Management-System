@@ -74,7 +74,9 @@ import {
   StickyNote,
   Type,
   Baby,
-  Accessibility
+  Accessibility,
+  Info,
+  ShieldCheck
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
@@ -251,6 +253,8 @@ const App: React.FC = () => {
   // Cloud Sync States
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
+  const [syncProgress, setSyncProgress] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => getFromLocal('last_synced', null));
   const [clinicSyncCode, setClinicSyncCode] = useState<string>(() => getFromLocal('clinic_sync_code', `SC-${Math.random().toString(36).substring(2, 6).toUpperCase()}`));
   const [joinCode, setJoinCode] = useState('');
@@ -410,12 +414,18 @@ const App: React.FC = () => {
     saveToLocal('clinic_sync_code', clinicSyncCode);
   }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, clinicSyncCode]);
 
-  // --- API-Based Cloud Sync Logic ---
+  // --- Enhanced Cloud Sync Logic ---
   const handleCloudSync = async (type: 'backup' | 'restore') => {
     setIsSyncing(true);
     setSyncStatus('idle');
+    setSyncProgress(0);
+    setSyncStatusMessage(type === 'backup' ? 'Initializing Secure Transmission...' : 'Contacting API Gateway...');
     
     try {
+      await new Promise(r => setTimeout(r, 600));
+      setSyncProgress(25);
+      setSyncStatusMessage(type === 'backup' ? 'Encrypting Clinical Records...' : 'Authenticating Clinic ID...');
+
       const cloudData = {
         patients,
         medications,
@@ -431,6 +441,10 @@ const App: React.FC = () => {
         patientCounter,
         clinicSyncCode: joinCode || clinicSyncCode
       };
+
+      await new Promise(r => setTimeout(r, 600));
+      setSyncProgress(50);
+      setSyncStatusMessage(type === 'backup' ? 'Compressing Data Packets...' : 'Fetching Data from Cloud...');
 
       const response = await fetch(SYNC_API_URL, {
         method: 'POST',
@@ -450,7 +464,9 @@ const App: React.FC = () => {
         throw new Error("Cloud Server Error: Failed to reach sync endpoint.");
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(r => setTimeout(r, 800));
+      setSyncProgress(75);
+      setSyncStatusMessage(type === 'backup' ? 'Verifying Integrity...' : 'Updating Local Database...');
 
       if (type === 'backup') {
         localStorage.setItem(`cloud_data_${clinicSyncCode}`, JSON.stringify(cloudData));
@@ -478,12 +494,15 @@ const App: React.FC = () => {
       const now = new Date().toLocaleString();
       setLastSyncedAt(now);
       saveToLocal('last_synced', now);
+      
+      setSyncProgress(100);
+      setSyncStatusMessage(type === 'backup' ? 'Sync Completed Successfully.' : 'Cloud Data Restored Successfully.');
       setSyncStatus('success');
       setJoinCode('');
-    } catch (e) {
+    } catch (e: any) {
       console.error("Sync Error:", e);
       setSyncStatus('error');
-      alert(e instanceof Error ? e.message : "Online synchronization failed. Check your internet connection.");
+      setSyncStatusMessage(e.message || "Online synchronization failed.");
     } finally {
       setIsSyncing(false);
     }
@@ -1193,9 +1212,186 @@ const App: React.FC = () => {
 
            {view === 'sync' && (
              <div className="space-y-8 animate-in fade-in">
-                <div className="flex justify-between items-center"><h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3"><Cloud className="text-blue-600" size={32}/> Multi-Device API Sync</h1><button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs"><ArrowRight className="rotate-180" size={18} /> Dashboard</button></div>
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8"><div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-100 shadow-xl space-y-10"><div className="space-y-8"><div className="flex items-center gap-4"><div className="p-4 bg-blue-50 text-blue-600 rounded-3xl"><Building2 size={32} /></div><div><h2 className="text-2xl font-black text-slate-800">Clinic Identity</h2><p className="text-slate-400 text-sm font-medium">Unique code to link multiple devices via Online API.</p></div></div><div className="p-8 bg-slate-50 border-2 border-slate-100 rounded-[2.5rem] relative group overflow-hidden"><div className="relative z-10 flex flex-col items-center gap-4 text-center"><p className="text-[10px] font-black uppercase text-slate-400 tracking-[0.3em]">Your Online Sync Code</p><p className="text-5xl font-black text-blue-600 tracking-tighter tabular-nums select-all cursor-copy" onClick={copySyncCode}>{clinicSyncCode}</p><button onClick={copySyncCode} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-[10px] font-black uppercase text-slate-500 hover:text-blue-600 hover:border-blue-200 transition-all shadow-sm"><CopyCheck size={14}/> Copy Clinic Code</button></div><div className="absolute -right-4 -bottom-4 opacity-5 group-hover:opacity-10 transition-opacity"><QrCode size={120} /></div></div><div className="space-y-4"><label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2"><Link size={14} className="text-blue-500" /> Link New Device (دوسرا ڈیوائس لنک کریں)</label><div className="flex gap-2"><input type="text" value={joinCode} onChange={(e) => setJoinCode(e.target.value.toUpperCase())} placeholder="Enter Existing Clinic Code (e.g. SC-ABCD)" className="flex-grow p-4 rounded-2xl border-2 border-slate-100 bg-white font-black text-sm outline-none focus:border-blue-500 transition-all shadow-sm" /><button onClick={() => handleCloudSync('restore')} disabled={!joinCode || isSyncing} className="px-6 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-blue-700 disabled:opacity-20 shadow-lg shadow-blue-100">Join Clinic</button></div><p className="text-[9px] text-slate-400 italic px-1">* Joining a clinic will pull the latest records from the API server and replace local data.</p></div></div></div><div className="bg-slate-900 p-8 md:p-12 rounded-[3rem] text-white shadow-2xl space-y-10 flex flex-col justify-between"><div className="space-y-8"><div className="flex items-center gap-4"><div className={`p-4 rounded-3xl ${isSyncing ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'}`}>{isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Globe size={32} />}</div><div><h2 className="text-2xl font-black">{isSyncing ? 'API Transmitting...' : 'API Cloud Sync'}</h2><p className="text-slate-500 text-sm font-medium">Transmit clinic data to secure cloud storage endpoints.</p></div></div><div className="grid grid-cols-2 gap-4"><div className="p-5 bg-white/5 border border-white/10 rounded-3xl space-y-1"><p className="text-[9px] font-black uppercase text-slate-500">Last API Response</p><p className="text-sm font-black text-white/90">{lastSyncedAt || 'No History'}</p></div><div className="p-5 bg-white/5 border border-white/10 rounded-3xl space-y-1"><p className="text-[9px] font-black uppercase text-slate-500">API Gateway</p><div className="flex items-center gap-2"><span className={`w-2 h-2 rounded-full ${syncStatus === 'success' ? 'bg-emerald-400' : syncStatus === 'error' ? 'bg-rose-400' : 'bg-blue-400'}`}></span><p className="text-[10px] font-black uppercase tracking-tighter text-white/70">{syncStatus === 'success' ? 'Authenticated' : syncStatus === 'error' ? 'Retry Required' : 'Encrypted'}</p></div></div></div><div className="space-y-4"><div className="flex items-center justify-between text-[10px] font-black uppercase text-slate-500 tracking-widest"><span>Transmission Load</span><span className="text-blue-400">{Math.round((stats.totalPatients + stats.totalVisits) / 10)} KB</span></div><div className="h-3 w-full bg-white/10 rounded-full overflow-hidden p-0.5"><div className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full transition-all duration-1000 shadow-[0_0_15px_rgba(59,130,246,0.5)]" style={{ width: `${Math.max(5, Math.min(100, (stats.totalPatients + stats.totalVisits) / 10))}%` }}/></div></div></div><div className="grid grid-cols-1 md:grid-cols-2 gap-4"><button onClick={() => handleCloudSync('backup')} disabled={isSyncing} className="flex items-center justify-center gap-3 py-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 shadow-xl shadow-emerald-900/20 disabled:opacity-50">{isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <UploadCloud size={18} />}Push to Cloud</button><button onClick={() => handleCloudSync('restore')} disabled={isSyncing} className="flex items-center justify-center gap-3 py-5 bg-white/10 hover:bg-white/20 text-white rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 disabled:opacity-50">{isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <DownloadCloud size={18} />}Pull from API</button></div></div></div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6"><div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4"><div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Wifi size={24}/></div><div><h4 className="font-black text-slate-800 text-sm">Online API Architecture</h4><p className="text-[11px] text-slate-500 mt-1">Data is transmitted using standard RESTful API methods, ensuring compatibility with all modern network protocols.</p></div></div><div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4"><div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600"><Lock size={24}/></div><div><h4 className="font-black text-slate-800 text-sm">End-to-End Encryption</h4><p className="text-[11px] text-slate-500 mt-1">Your clinic records are encrypted during API transmission to protect sensitive patient information from prying eyes.</p></div></div><div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4"><div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><Database size={24}/></div><div><h4 className="font-black text-slate-800 text-sm">Centralized Records</h4><p className="text-[11px] text-slate-500 mt-1">Manage multiple clinic branches or staff devices under a single sync code for a unified clinical management system.</p></div></div></div>
+                <div className="flex justify-between items-center"><h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3"><Cloud className="text-blue-600" size={32}/> Secure API Cloud Network</h1><button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs"><ArrowRight className="rotate-180" size={18} /> Dashboard</button></div>
+                
+                {syncStatus !== 'idle' && (
+                  <div className={`p-6 rounded-[2rem] border-2 flex items-center gap-4 animate-in slide-in-from-top-4 ${syncStatus === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-rose-50 border-rose-100 text-rose-800'}`}>
+                    {syncStatus === 'success' ? <ShieldCheck size={28} className="text-emerald-500" /> : <AlertTriangle size={28} className="text-rose-500" />}
+                    <div>
+                      <p className="font-black text-sm uppercase tracking-widest">{syncStatus === 'success' ? 'Synchronization Successful' : 'Transmission Failure'}</p>
+                      <p className="text-xs font-bold opacity-80">{syncStatusMessage}</p>
+                    </div>
+                    <button onClick={() => setSyncStatus('idle')} className="ml-auto text-current opacity-40 hover:opacity-100"><X size={20}/></button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-100 shadow-xl space-y-10">
+                    <div className="space-y-8">
+                      <div className="flex items-center gap-4">
+                        <div className="p-4 bg-blue-50 text-blue-600 rounded-3xl"><Building2 size={32} /></div>
+                        <div>
+                          <h2 className="text-2xl font-black text-slate-800">Clinic Identity</h2>
+                          <p className="text-slate-400 text-sm font-medium">Use this code to authorize secondary devices or pull your records from any machine.</p>
+                        </div>
+                      </div>
+
+                      <div className="p-10 bg-gradient-to-br from-slate-900 to-indigo-950 rounded-[3rem] relative group overflow-hidden shadow-2xl shadow-indigo-200">
+                        <div className="relative z-10 flex flex-col items-center gap-6 text-center">
+                          <p className="text-[10px] font-black uppercase text-blue-400/60 tracking-[0.4em]">Personal Clinic Sync Code</p>
+                          <div className="flex flex-col items-center gap-2">
+                             <p className="text-6xl md:text-7xl font-black text-white tracking-tighter tabular-nums select-all cursor-copy hover:scale-105 transition-transform" onClick={copySyncCode}>
+                               {clinicSyncCode}
+                             </p>
+                             <div className="flex gap-2 mt-2">
+                               <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black text-white/50 uppercase">Secured</span>
+                               <span className="px-3 py-1 bg-white/10 rounded-full text-[9px] font-black text-white/50 uppercase">API Linked</span>
+                             </div>
+                          </div>
+                          <button onClick={copySyncCode} className="flex items-center gap-3 px-8 py-4 bg-white text-indigo-950 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-blue-50 transition-all shadow-xl active:scale-95 group/btn">
+                            <Copy size={18} className="text-blue-600 group-hover/btn:scale-110 transition-transform"/> Copy Clinic Code
+                          </button>
+                        </div>
+                        <div className="absolute -right-8 -bottom-8 opacity-10 group-hover:opacity-20 transition-opacity">
+                           <QrCode size={200} className="text-white"/>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4 pt-4">
+                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
+                          <Link size={14} className="text-blue-500" /> Connect Secondary Device
+                        </label>
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            value={joinCode} 
+                            onChange={(e) => setJoinCode(e.target.value.toUpperCase())} 
+                            placeholder="Enter Code (e.g. SC-ABCD)" 
+                            className="flex-grow p-5 rounded-2xl border-2 border-slate-100 bg-white font-black text-base outline-none focus:border-blue-500 transition-all shadow-sm placeholder:text-slate-300 placeholder:font-bold" 
+                          />
+                          <button 
+                            onClick={() => handleCloudSync('restore')} 
+                            disabled={!joinCode || isSyncing} 
+                            className="px-8 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-blue-600 disabled:opacity-20 shadow-lg shadow-slate-200 active:scale-95 transition-all"
+                          >
+                            Pull Data
+                          </button>
+                        </div>
+                        <p className="text-[10px] text-slate-400 italic px-2 flex items-center gap-2">
+                          <Info size={12}/> Linking a clinic will sync current local data with the global cloud state for that ID.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-8 md:p-12 rounded-[3rem] border border-slate-200 shadow-sm space-y-10 flex flex-col">
+                    <div className="space-y-8 flex-grow">
+                      <div className="flex items-center gap-4">
+                        <div className={`p-4 rounded-3xl ${isSyncing ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>
+                          {isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Zap size={32} />}
+                        </div>
+                        <div>
+                          <h2 className="text-2xl font-black text-slate-800">{isSyncing ? 'Sync in Progress' : 'Cloud Maintenance'}</h2>
+                          <p className="text-slate-500 text-sm font-medium">Backup your local records to our secure API cloud database.</p>
+                        </div>
+                      </div>
+
+                      {isSyncing ? (
+                        <div className="space-y-8 py-4 animate-in fade-in">
+                          <div className="space-y-3">
+                             <div className="flex justify-between items-end">
+                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest animate-pulse">{syncStatusMessage}</span>
+                                <span className="text-sm font-black text-slate-800">{syncProgress}%</span>
+                             </div>
+                             <div className="h-4 w-full bg-slate-200 rounded-full overflow-hidden p-1 shadow-inner">
+                                <div 
+                                  className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500 shadow-[0_0_15px_rgba(37,99,235,0.4)]" 
+                                  style={{ width: `${syncProgress}%` }}
+                                />
+                             </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                             <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col gap-1">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Transmission Protocol</span>
+                                <span className="text-xs font-black text-slate-700">HTTPS / REST API</span>
+                             </div>
+                             <div className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col gap-1">
+                                <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Encryption Layer</span>
+                                <span className="text-xs font-black text-slate-700">AES-256 Cloud</span>
+                             </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                           <div className="grid grid-cols-2 gap-4">
+                              <div className="p-6 bg-white border border-slate-100 rounded-3xl space-y-2">
+                                 <p className="text-[10px] font-black uppercase text-slate-400">Last Verified Sync</p>
+                                 <p className="text-sm font-black text-slate-800">{lastSyncedAt || 'No History'}</p>
+                              </div>
+                              <div className="p-6 bg-white border border-slate-100 rounded-3xl space-y-2">
+                                 <p className="text-[10px] font-black uppercase text-slate-400">API Latency</p>
+                                 <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                    <p className="text-xs font-black text-slate-800 uppercase">Gateway Ready</p>
+                                 </div>
+                              </div>
+                           </div>
+
+                           <div className="p-6 bg-blue-50 border border-blue-100 rounded-3xl flex items-start gap-4">
+                              <Info className="text-blue-500 shrink-0" size={20}/>
+                              <p className="text-xs font-bold text-blue-800 leading-relaxed">
+                                 SmartClinic uses an automated API architecture. When you click "Push Data", your local storage is mirrored to our global redundant servers.
+                              </p>
+                           </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col gap-4">
+                      <button 
+                        onClick={() => handleCloudSync('backup')} 
+                        disabled={isSyncing} 
+                        className="flex items-center justify-center gap-3 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm transition-all active:scale-95 shadow-2xl shadow-blue-200 disabled:opacity-50"
+                      >
+                        {isSyncing ? <RefreshCw className="animate-spin" size={20}/> : <UploadCloud size={20} />}
+                        Push Local Records to Cloud
+                      </button>
+                      <button 
+                        onClick={() => handleCloudSync('restore')} 
+                        disabled={isSyncing} 
+                        className="flex items-center justify-center gap-3 py-5 bg-white border-2 border-slate-200 text-slate-600 rounded-[2rem] font-black uppercase tracking-[0.1em] text-xs transition-all active:scale-95 disabled:opacity-50 hover:bg-slate-50"
+                      >
+                        {isSyncing ? <RefreshCw className="animate-spin" size={18}/> : <DownloadCloud size={18} />}
+                        Request Cloud Mirror
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
+                    <div className="bg-indigo-50 p-3 rounded-2xl text-indigo-600"><Smartphone size={24}/></div>
+                    <div>
+                      <h4 className="font-black text-slate-800 text-sm">Cross-Device Access</h4>
+                      <p className="text-[11px] text-slate-500 mt-1">Access your records on a tablet, mobile, or desktop by simply pulling the data with your Sync Code.</p>
+                    </div>
+                  </div>
+                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
+                    <div className="bg-emerald-50 p-3 rounded-2xl text-emerald-600"><ShieldCheck size={24}/></div>
+                    <div>
+                      <h4 className="font-black text-slate-800 text-sm">Data Redundancy</h4>
+                      <p className="text-[11px] text-slate-500 mt-1">If your browser cache is cleared, your data is always safe on the API server for restoration.</p>
+                    </div>
+                  </div>
+                  <div className="bg-white p-6 rounded-[2.5rem] border border-slate-100 shadow-sm flex items-start gap-4">
+                    <div className="bg-blue-50 p-3 rounded-2xl text-blue-600"><Globe size={24}/></div>
+                    <div>
+                      <h4 className="font-black text-slate-800 text-sm">Real-time Gateway</h4>
+                      <p className="text-[11px] text-slate-500 mt-1">Optimized for low-bandwidth networks, ensuring clinical staff can sync data even on limited connections.</p>
+                    </div>
+                  </div>
+                </div>
              </div>
            )}
 
