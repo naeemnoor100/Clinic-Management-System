@@ -7,6 +7,18 @@
     <title>SmartClinic</title>
     <meta name="theme-color" content="#2563eb">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Nastaliq+Urdu:wght@400..700&display=swap" rel="stylesheet">
     <!-- Jameel Noori Nastaleeq CDN -->
     <link href="https://fonts.cdnfonts.com/css/jameel-noori-nastaleeq" rel="stylesheet">
@@ -28,6 +40,7 @@
             font-family: var(--font-sans);
             background-color: #f8fafc;
             font-size: var(--base-font-size);
+            transition: background-color 0.3s ease;
         }
 
         /* Applying Urdu font to all text containers to handle mixed content gracefully */
@@ -88,6 +101,11 @@
             direction: rtl;
             line-height: 2.2;
         }
+
+        /* Ensure smooth transitions for dark mode */
+        * {
+            transition: border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
+        }
     </style>
 <script type="importmap">
 {
@@ -104,7 +122,7 @@
 }
 </script>
 </head>
-<body>
+<body class="bg-slate-50 dark:bg-slate-950 transition-colors duration-300">
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
 </body>
