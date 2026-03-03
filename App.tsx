@@ -68,6 +68,8 @@ import {
   Link,
   Smartphone,
   CopyCheck,
+  Upload,
+  WifiOff,
   DownloadCloud,
   UploadCloud,
   Globe,
@@ -247,7 +249,7 @@ const SidebarItem: React.FC<{ icon: React.ReactNode; label: string; active?: boo
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('dashboard');
-  const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock' | 'appearance'>('vitals');
+  const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock' | 'appearance' | 'sync'>('appearance');
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
   const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
   
@@ -258,16 +260,13 @@ const App: React.FC = () => {
   });
 
   // --- Real-time Sync States ---
-  const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => getFromLocal('auto_sync_enabled', false));
-  const [syncEndpoint, setSyncEndpoint] = useState<string>(() => getFromLocal('sync_endpoint', DEFAULT_SYNC_URL));
+  // const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => getFromLocal('auto_sync_enabled', false)); // Deprecated: Always enabled
+  const [syncEndpoint, setSyncEndpoint] = useState<string>(DEFAULT_SYNC_URL);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error' | 'preview_mode'>('idle');
   const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
   const [syncProgress, setSyncProgress] = useState(0);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => getFromLocal('last_synced', null));
-  const [clinicSyncCode, setClinicSyncCode] = useState<string>(() => getFromLocal('clinic_sync_code', `SC-${Math.random().toString(36).substring(2, 6).toUpperCase()}`));
-  const [joinCode, setJoinCode] = useState('');
-  const [showSyncHelp, setShowSyncHelp] = useState(false);
 
   // Pharmacy POS state
   const [showPharmacyCartMobile, setShowPharmacyCartMobile] = useState(false);
@@ -401,7 +400,6 @@ const App: React.FC = () => {
         setShowPharmacyCartMobile(false);
         setShowCustomerResults(false);
         setSelectedSaleForReceipt(null);
-        setShowSyncHelp(false);
       }
       // POS shortcut: press '/' to focus search
       if (e.key === '/' && view === 'pharmacy' && document.activeElement?.tagName !== 'INPUT') {
@@ -414,7 +412,138 @@ const App: React.FC = () => {
   }, [view]);
 
   // --- Real-time Auto Sync Trigger ---
+  const [pendingSync, setPendingSync] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const isFirstRender = useRef(true);
+  
+  // Base state for 3-way merge (Snapshot of what we last saw from server)
+  const baseStateRef = useRef<any>(() => {
+    try {
+        const saved = localStorage.getItem('smartclinic_basestate');
+        return saved ? JSON.parse(saved) : {};
+    } catch {
+        return {};
+    }
+  });
+  
+  // Track deletions explicitly for sync
+  const pendingDeletions = useRef<{id: string, type: string}[]>([]);
+
+  // Helper for deep comparison
+  // --- Utility: Deep Equal ---
+  const isDeepEqual = (a: any, b: any): boolean => {
+    if (a === b) return true;
+    if (a == b) return true; // Coercion check (e.g., 20 == "20")
+    
+    if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) {
+      return false;
+    }
+
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+
+    if (Array.isArray(a)) {
+      if (a.length !== b.length) return false;
+      for (let i = 0; i < a.length; i++) {
+        if (!isDeepEqual(a[i], b[i])) return false;
+      }
+      return true;
+    }
+
+    const keysA = Object.keys(a);
+    const keysB = Object.keys(b);
+
+    // We only care about keys that actually have defined values
+    const ignoredKeys = ['clinicId', 'clinic_id', 'last_updated', 'lastUpdated'];
+    const definedKeysA = keysA.filter(k => !ignoredKeys.includes(k) && a[k] !== undefined && a[k] !== null && a[k] !== '');
+    const definedKeysB = keysB.filter(k => !ignoredKeys.includes(k) && b[k] !== undefined && b[k] !== null && b[k] !== '');
+
+    if (definedKeysA.length !== definedKeysB.length) return false;
+
+    for (const key of definedKeysA) {
+      if (!definedKeysB.includes(key)) return false;
+      if (!isDeepEqual(a[key], b[key])) return false;
+    }
+
+    return true;
+  };
+
+  // Initial Data Fetch
   useEffect(() => {
+    const initApp = async () => {
+      await handleCloudSync('restore', true);
+      setIsInitialized(true);
+    };
+    initApp();
+  }, []); // Run once on mount
+
+  // Long Polling for Real-Time Updates
+  useEffect(() => {
+    if (!isInitialized) return;
+
+    let isMounted = true;
+    let pollController = new AbortController();
+
+    const startLongPolling = async () => {
+        if (!isMounted) return;
+        
+        // Don't poll if we are actively syncing or have pending changes (let the backup finish first)
+        if (isSyncing || pendingSync) {
+            setTimeout(startLongPolling, 1000);
+            return;
+        }
+
+        try {
+            // Get last sync timestamp from local storage or state
+            const lastSyncTime = localStorage.getItem('last_synced_timestamp') || new Date(0).toISOString();
+
+            pollController = new AbortController(); // Reset controller for new request
+
+            const response = await fetch(`${syncEndpoint}?t=${new Date().getTime()}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'poll' },
+                body: JSON.stringify({ action: 'poll', timestamp: lastSyncTime }),
+                signal: pollController.signal
+            });
+
+            if (!response.ok) throw new Error("Poll failed");
+
+            const text = await response.text();
+            // Check for PHP preview mode (raw PHP returned)
+            if (text.trim().startsWith('<?php') || text.includes('<?php')) {
+                 if (isMounted) setTimeout(startLongPolling, 5000);
+                 return;
+            }
+
+            const data = JSON.parse(text);
+
+            if (data.status === 'update_available') {
+                // Server has new data! Trigger restore.
+                await handleCloudSync('restore', true);
+                // Update timestamp
+                if (data.timestamp) localStorage.setItem('last_synced_timestamp', data.timestamp);
+            }
+            
+            // Immediately start next poll
+            if (isMounted) startLongPolling();
+
+        } catch (e: any) {
+            if (e.name === 'AbortError') return;
+            // On error, wait a bit before retrying (faster retry for auto-sync feel)
+            if (isMounted) setTimeout(startLongPolling, 2000);
+        }
+    };
+
+    startLongPolling();
+
+    return () => {
+        isMounted = false;
+        pollController.abort();
+    };
+  }, [isInitialized, isSyncing, pendingSync]);
+
+  useEffect(() => {
+    if (!isInitialized) return; // Don't save to local or trigger sync until we've loaded from cloud
+
     saveToLocal('patients', patients);
     saveToLocal('meds', medications);
     saveToLocal('scientific', scientificNames);
@@ -426,114 +555,281 @@ const App: React.FC = () => {
     saveToLocal('templates', prescriptionTemplates);
     saveToLocal('visits', visits);
     saveToLocal('pharmacy_sales', pharmacySales);
-    saveToLocal('clinic_sync_code', clinicSyncCode);
-    saveToLocal('auto_sync_enabled', isAutoSyncEnabled);
     saveToLocal('sync_endpoint', syncEndpoint);
 
-    // If auto-sync is on, trigger a background backup
-    if (isAutoSyncEnabled && !isSyncing) {
-       handleCloudSync('backup', true);
+    // Skip the first render after initialization so we don't immediately backup what we just restored
+    if (isFirstRender.current) {
+        isFirstRender.current = false;
+        return;
     }
-  }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, clinicSyncCode, isAutoSyncEnabled, syncEndpoint]);
+
+    // Mark that we have pending changes
+    setPendingSync(true);
+  }, [patients, medications, scientificNames, companyNames, medTypes, medCategories, symptoms, vitalDefinitions, prescriptionTemplates, visits, pharmacySales, syncEndpoint, isInitialized]);
+
+  // Effect to process the pending sync queue
+  useEffect(() => {
+    if (pendingSync && !isSyncing && isInitialized) {
+        const timer = setTimeout(() => {
+            handleCloudSync('backup', true);
+        }, 1000); // 1 second debounce for faster updates
+        return () => clearTimeout(timer);
+    }
+  }, [pendingSync, isSyncing, isInitialized]);
+
+  // --- Database Install Logic ---
+  const handleDbInstall = async () => {
+      if (!confirm("This will attempt to create the necessary database tables on your server. Continue?")) return;
+      
+      try {
+          const response = await fetch(`${syncEndpoint}?t=${Date.now()}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'install' },
+              body: JSON.stringify({ action: 'install' })
+          });
+
+          if (!response.ok) throw new Error("Install request failed");
+          
+          const text = await response.text();
+          if (text.trim().startsWith('<?php') || text.includes('<?php')) {
+               alert("Server returned raw PHP. Check your server configuration.");
+               return;
+          }
+          
+          const result = JSON.parse(text);
+          if (result.status === 'success') {
+              alert(result.message);
+              // Optionally trigger a sync after install
+              handleCloudSync('restore');
+          } else {
+              alert("Error: " + result.message);
+          }
+
+      } catch (e: any) {
+          console.error("Install Error:", e);
+          alert("Installation failed: " + e.message);
+      }
+  };
 
   // --- Enhanced Cloud Sync Logic with Auto-Sync Support ---
   const handleCloudSync = async (type: 'backup' | 'restore', isBackground = false) => {
     if (isSyncing) return;
     setIsSyncing(true);
-    if (!isBackground) {
-       setSyncStatus('idle');
-       setSyncProgress(0);
-       setSyncStatusMessage(type === 'backup' ? 'Initializing Secure Transmission...' : 'Contacting API Gateway...');
-    }
     
+    if (!isBackground) {
+      setSyncStatus('idle');
+      setSyncProgress(0);
+      setSyncStatusMessage(type === 'backup' ? 'Syncing changes...' : 'Fetching data...');
+    }
+
     try {
-      if (!isBackground) await new Promise(r => setTimeout(r, 600));
-      setSyncProgress(25);
-      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Encrypting Clinical Records...' : 'Authenticating Clinic ID...');
+      if (type === 'backup') {
+        if (!isBackground) setSyncProgress(30);
 
-      const cloudData = {
-        patients,
-        medications,
-        scientificNames,
-        companyNames,
-        medTypes,
-        medCategories,
-        symptoms,
-        vitalDefinitions,
-        prescriptionTemplates,
-        visits,
-        pharmacySales,
-        patientCounter,
-        clinicSyncCode: joinCode || clinicSyncCode
-      };
+        // 1. Calculate Deltas (Local vs Base)
+        const changes: Record<string, any> = {};
+        let hasChanges = false;
 
-      if (!isBackground) await new Promise(r => setTimeout(r, 600));
-      setSyncProgress(50);
-      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Compressing Data Packets...' : 'Fetching Data from Cloud...');
+        const currentState: Record<string, any> = {
+            patients, medications, visits, pharmacySales, 
+            scientificNames, companyNames, medTypes, medCategories, 
+            symptoms, vitalDefinitions, prescriptionTemplates
+        };
 
-      const response = await fetch(syncEndpoint || DEFAULT_SYNC_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Sync-Code': joinCode || clinicSyncCode,
-          'X-Action-Type': type
-        },
-        body: JSON.stringify({
-          action: type,
-          timestamp: new Date().toISOString(),
-          data: cloudData
-        })
-      });
+        const entityKeys = [
+            'patients', 'medications', 'visits', 'pharmacySales', 
+            'scientificNames', 'companyNames', 'medTypes', 'medCategories', 
+            'symptoms', 'vitalDefinitions', 'prescriptionTemplates'
+        ];
 
-      if (!response.ok) {
-        let msg = `Server returned error: ${response.status}.`;
-        if (response.status === 404) msg += " The 'sync.php' file was not found. Note: PHP cannot run on static hosts like Netlify or local Vite dev server. Please host it on a PHP-enabled server.";
-        else msg += " Ensure sync.php is uploaded to your host.";
-        throw new Error(msg);
-      }
-
-      const responseData = await response.json();
-
-      if (!isBackground) await new Promise(r => setTimeout(r, 800));
-      setSyncProgress(75);
-      if (!isBackground) setSyncStatusMessage(type === 'backup' ? 'Verifying Integrity...' : 'Updating Local Database...');
-
-      // Fix: TypeScript narrowing fix
-      if (type === 'restore') {
-        const data = responseData.data;
-        if (!data) throw new Error("No cloud record found for this Clinic Code on the server.");
+        entityKeys.forEach(key => {
+            const currentItems = currentState[key] || [];
+            const baseItems = baseStateRef.current[key] || [];
+            const baseMap = new Map(baseItems.map((i: any) => [i.id, i]));
+            
+            const delta = currentItems.filter((item: any) => {
+                const base = baseMap.get(item.id);
+                return !base || !isDeepEqual(item, base);
+            });
+            
+            if (delta.length > 0) {
+                changes[key] = delta;
+                hasChanges = true;
+            }
+        });
         
-        setPatients(data.patients || []);
-        setMedications(data.medications || []);
-        setScientificNames(data.scientificNames || []);
-        setCompanyNames(data.companyNames || []);
-        setMedTypes(data.medTypes || []);
-        setMedCategories(data.medCategories || []);
-        setSymptoms(data.symptoms || []);
-        setVitalDefinitions(data.vitalDefinitions || []);
-        setPrescriptionTemplates(data.prescriptionTemplates || []);
-        setVisits(data.visits || []);
-        setPharmacySales(data.pharmacySales || []);
-        setPatientCounter(data.patientCounter || 0);
-        if (joinCode) setClinicSyncCode(joinCode);
+        // Check patientCounter
+        if (patientCounter !== baseStateRef.current.patientCounter) {
+            changes.patientCounter = patientCounter;
+            hasChanges = true;
+        }
+
+        const deletions = pendingDeletions.current;
+        if (deletions.length > 0) hasChanges = true;
+
+        if (!hasChanges) {
+            if (!isBackground) {
+                setSyncProgress(100);
+                setSyncStatus('success');
+                setTimeout(() => setSyncStatus('idle'), 1000);
+            }
+            setIsSyncing(false);
+            return;
+        }
+
+        // 2. Send Payload
+        const response = await fetch(syncEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'backup' },
+            body: JSON.stringify({
+                action: 'backup',
+                data: changes,
+                deletedIds: deletions
+            })
+        });
+
+        if (!response.ok) throw new Error("Sync failed");
+        
+        // 3. Update Base State to match Current State (for the items we synced)
+        const newBase = { ...baseStateRef.current };
+        
+        entityKeys.forEach(key => {
+            if (changes[key]) {
+                const baseItems = [...(newBase[key] || [])];
+                
+                // Apply updates/inserts to base
+                changes[key].forEach((item: any) => {
+                    const idx = baseItems.findIndex((b: any) => b.id === item.id);
+                    if (idx >= 0) baseItems[idx] = item;
+                    else baseItems.push(item);
+                });
+                newBase[key] = baseItems;
+            }
+        });
+        
+        // Apply Deletions to Base
+        deletions.forEach(del => {
+            if (newBase[del.type]) {
+                newBase[del.type] = newBase[del.type].filter((i: any) => i.id !== del.id);
+            }
+        });
+
+        if (changes.patientCounter !== undefined) {
+            newBase.patientCounter = changes.patientCounter;
+        }
+
+        baseStateRef.current = newBase;
+        localStorage.setItem('smartclinic_basestate', JSON.stringify(newBase));
+        
+        // Clear deletions that were sent
+        pendingDeletions.current = []; 
+        setPendingSync(false);
+
+      } else {
+        // RESTORE (Pull)
+        if (!isBackground) setSyncProgress(30);
+        
+        const response = await fetch(`${syncEndpoint}?t=${Date.now()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'restore' },
+            body: JSON.stringify({ action: 'restore' })
+        });
+
+        if (!response.ok) throw new Error("Fetch failed");
+        
+        const text = await response.text();
+        if (text.trim().startsWith('<?php') || text.includes('<?php')) {
+             setIsSyncing(false);
+             return;
+        }
+        
+        const result = JSON.parse(text);
+        if (result.status === 'error') throw new Error(result.message);
+        
+        const serverData = result.data;
+        const oldBase = baseStateRef.current;
+        
+        // Smart Merge: Server > Base, but Local > Server (if modified locally)
+        const smartMerge = (key: string, currentLocal: any[], serverItems: any[]) => {
+            // FRESH SYNC CHECK: If we have no base state, trust server 100%
+            if (Object.keys(oldBase).length === 0) {
+                 return [...serverItems];
+            }
+
+            const baseItems = oldBase[key] || [];
+            const baseMap = new Map(baseItems.map((i: any) => [i.id, i]));
+            
+            const merged = [...serverItems]; // Start with server truth
+            
+            // Re-apply local changes that haven't been synced yet
+            currentLocal.forEach(localItem => {
+                const baseItem = baseMap.get(localItem.id);
+                // If local differs from OLD base, it's a pending change. Keep it.
+                if (!baseItem || !isDeepEqual(localItem, baseItem)) {
+                    const idx = merged.findIndex(i => i.id === localItem.id);
+                    if (idx >= 0) merged[idx] = localItem; // Overwrite server with local work-in-progress
+                    else merged.push(localItem); // Keep new local item
+                }
+            });
+            
+            // Apply local deletions
+            const localDeletions = pendingDeletions.current.filter(d => d.type === key);
+            localDeletions.forEach(del => {
+                const idx = merged.findIndex(i => i.id === del.id);
+                if (idx >= 0) merged.splice(idx, 1);
+            });
+
+            return merged;
+        };
+
+        // Clear pending deletions on fresh sync
+        if (Object.keys(oldBase).length === 0) {
+            pendingDeletions.current = [];
+        }
+
+        // Batch updates
+        const updateIfChanged = (setter: any, newData: any, currentData: any) => {
+            if (!isDeepEqual(newData, currentData)) setter(newData);
+        };
+
+        updateIfChanged(setPatients, smartMerge('patients', patients, serverData.patients || []), patients);
+        updateIfChanged(setMedications, smartMerge('medications', medications, serverData.medications || []), medications);
+        updateIfChanged(setVisits, smartMerge('visits', visits, serverData.visits || []), visits);
+        updateIfChanged(setPharmacySales, smartMerge('pharmacySales', pharmacySales, serverData.pharmacySales || []), pharmacySales);
+        updateIfChanged(setScientificNames, smartMerge('scientificNames', scientificNames, serverData.scientificNames || []), scientificNames);
+        updateIfChanged(setCompanyNames, smartMerge('companyNames', companyNames, serverData.companyNames || []), companyNames);
+        updateIfChanged(setMedTypes, smartMerge('medTypes', medTypes, serverData.medTypes || []), medTypes);
+        updateIfChanged(setMedCategories, smartMerge('medCategories', medCategories, serverData.medCategories || []), medCategories);
+        updateIfChanged(setSymptoms, smartMerge('symptoms', symptoms, serverData.symptoms || []), symptoms);
+        updateIfChanged(setVitalDefinitions, smartMerge('vitalDefinitions', vitalDefinitions, serverData.vitalDefinitions || []), vitalDefinitions);
+        updateIfChanged(setPrescriptionTemplates, smartMerge('prescriptionTemplates', prescriptionTemplates, serverData.prescriptionTemplates || []), prescriptionTemplates);
+        
+        setPatientCounter(Math.max(patientCounter, serverData.patientCounter || 0));
+
+        // Update Base State to Server Data
+        baseStateRef.current = serverData;
+        localStorage.setItem('smartclinic_basestate', JSON.stringify(serverData));
+        
+        const now = new Date().toLocaleString();
+        setLastSyncedAt(now);
+        saveToLocal('last_synced', now);
       }
 
-      const now = new Date().toLocaleString();
-      setLastSyncedAt(now);
-      saveToLocal('last_synced', now);
-      
-      setSyncProgress(100);
       if (!isBackground) {
-        setSyncStatusMessage(type === 'backup' ? 'Sync Completed Successfully.' : 'Cloud Data Restored.');
+        setSyncProgress(100);
+        setSyncStatusMessage('Synced');
         setSyncStatus('success');
-        setJoinCode('');
+        setTimeout(() => setSyncStatus('idle'), 2000);
       }
+
     } catch (e: any) {
       console.error("Sync Error:", e);
       if (!isBackground) {
         setSyncStatus('error');
-        setSyncStatusMessage(e.message || "Online synchronization failed. Check your internet or endpoint.");
+        setSyncStatusMessage(e.message || "Sync failed.");
       }
+      // Force retry on next cycle if backup failed
+      if (type === 'backup') setPendingSync(true);
     } finally {
       setIsSyncing(false);
     }
@@ -556,11 +852,6 @@ const App: React.FC = () => {
     } finally {
       setIsSummarizing(false);
     }
-  };
-
-  const copySyncCode = () => {
-    navigator.clipboard.writeText(clinicSyncCode);
-    alert("Clinic Sync Code copied to clipboard!");
   };
 
   // --- CSV Export/Import Helpers ---
@@ -1017,6 +1308,7 @@ const App: React.FC = () => {
 
   const handleDeletePatient = (patientId: string) => {
     if (window.confirm("Are you sure you want to delete this patient and all their clinical records?")) {
+      pendingDeletions.current.push({id: patientId, type: 'patients'});
       setPatients(prev => prev.filter(p => p.id !== patientId));
       setVisits(prev => prev.filter(v => v.patientId !== patientId));
       if (selectedPatientId === patientId) { setSelectedPatientId(null); setView('patients'); }
@@ -1025,6 +1317,7 @@ const App: React.FC = () => {
 
   const handleDeleteVisit = (visitId: string) => {
     if (window.confirm("Are you sure you want to delete this clinical record?")) {
+      pendingDeletions.current.push({id: visitId, type: 'visits'});
       setVisits(prev => prev.filter(v => v.id !== visitId));
     }
   };
@@ -1224,14 +1517,50 @@ const App: React.FC = () => {
       <header className="md:hidden sticky top-0 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4 py-3 shrink-0 print:hidden">
         <div className="flex items-center gap-2"><div className="bg-blue-600 p-2 rounded-xl text-white"><Stethoscope size={20} /></div><span className="text-lg font-black text-slate-800 tracking-tighter">SmartClinic</span></div>
         <div className="flex items-center gap-2">
-          {isSyncing && <RefreshCw size={18} className="text-blue-500 animate-spin mr-2" />}
-          <button onClick={() => setView('sync')} className={`p-2 rounded-xl transition-colors relative ${view === 'sync' ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-500'}`}><Cloud size={20} /><span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-white ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span></button><button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 bg-slate-50 text-slate-500 rounded-xl"><Bell size={20} />{stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-[8px] text-white font-black animate-bounce">{stats.lowStockCount}</span>)}</button><button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg"><Plus size={20} /></button></div>
+            <div onClick={() => handleCloudSync('backup')} className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all cursor-pointer hover:opacity-80 active:scale-95 ${isSyncing || pendingSync ? 'bg-blue-50 border-blue-100' : syncStatus === 'error' ? 'bg-rose-50 border-rose-100' : syncStatus === 'preview_mode' ? 'bg-amber-50 border-amber-100' : 'bg-emerald-50 border-emerald-100'}`}>
+                {isSyncing || pendingSync ? <RefreshCw size={12} className="text-blue-500 animate-spin" /> : syncStatus === 'error' ? <WifiOff size={12} className="text-rose-500" /> : syncStatus === 'preview_mode' ? <AlertTriangle size={12} className="text-amber-500" /> : <Cloud size={12} className="text-emerald-500" />}
+                <span className={`text-[9px] font-black uppercase tracking-widest ${isSyncing || pendingSync ? 'text-blue-600' : syncStatus === 'error' ? 'text-rose-600' : syncStatus === 'preview_mode' ? 'text-amber-600' : 'text-emerald-600'}`}>{isSyncing || pendingSync ? 'Syncing' : syncStatus === 'preview_mode' ? 'Preview Mode' : 'Saved'}</span>
+            </div>
+            <button onClick={() => setShowNotifications(!showNotifications)} className="relative p-2 bg-slate-50 text-slate-500 rounded-xl"><Bell size={20} />{stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-600 border-2 border-white rounded-full flex items-center justify-center text-[8px] text-white font-black animate-bounce">{stats.lowStockCount}</span>)}</button><button onClick={() => { setEditingVisit(null); setShowVisitForm(true); }} className="bg-blue-600 text-white p-2 rounded-xl shadow-lg"><Plus size={20} /></button></div>
       </header>
 
       <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
-        <div className="flex items-center justify-between px-2"><div className="flex items-center gap-4"><div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div><div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div></div><div className="relative flex items-center gap-2"><button onClick={() => setView('sync')} className={`p-2 transition-colors relative ${view === 'sync' ? 'text-blue-600' : 'text-slate-400 hover:text-blue-600'}`} title="Cloud Sync"><Cloud size={22} /><span className={`absolute top-1 right-1 w-2.5 h-2.5 rounded-full border-2 border-slate-50 ${isSyncing ? 'bg-blue-500 animate-pulse' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></span></button><button onClick={() => setShowNotifications(!showNotifications)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative"><Bell size={22} className={stats.lowStockCount > 0 ? "animate-[pulse_2s_infinite]" : ""} />{stats.lowStockCount > 0 && (<span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-50"></span>)}</button>{showNotifications && (<div className="absolute left-full ml-4 top-0 w-72 bg-white border border-slate-200 shadow-2xl rounded-3xl z-[500] p-6 animate-in slide-in-from-left-4 overflow-hidden"><div className="flex items-center justify-between mb-4"><h4 className="text-xs font-black uppercase text-slate-400 tracking-widest">Inventory Alerts</h4><button onClick={() => setShowNotifications(false)} className="text-slate-300 hover:text-slate-500"><X size={16}/></button></div><div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1">{stats.lowStockCount > 0 ? stats.lowStockItems.map(m => (<div key={m.id} className="p-3 bg-rose-50 border border-rose-100 rounded-xl"><div className="flex justify-between items-start gap-2"><p className="text-[11px] font-black text-rose-800 leading-tight">{m.brandName}</p><span className="text-[9px] font-bold text-rose-500 whitespace-nowrap">Stock: {m.stock}</span></div><p className="text-[9px] font-bold text-rose-400 uppercase mt-1">Reorder Level: {m.reorderLevel}</p></div>)) : (<div className="py-10 text-center text-slate-300"><CheckCircle2 size={32} className="mx-auto mb-2 opacity-20" /><p className="text-[10px] font-black uppercase">All stock levels normal</p></div>)}</div>{stats.lowStockCount > 0 && (<button onClick={() => { setView('settings'); setSettingsTab('low_stock'); setShowNotifications(false); }} className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">Manage Procurement</button>)}</div>)}</div></div>
-        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} /><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Cloud size={24} />} label="Cloud Sync" active={view === 'sync'} onClick={() => setView('sync')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} /></nav>
-        <div className="mt-auto pt-6 border-t border-slate-200"><div className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm space-y-2"><div className="flex items-center justify-between"><p className="text-[8px] font-black uppercase text-slate-400 tracking-widest">Network Logic</p><div className={`w-2 h-2 rounded-full ${isSyncing ? 'bg-blue-500 animate-pulse shadow-[0_0_8px_rgba(59,130,246,0.5)]' : syncStatus === 'success' ? 'bg-emerald-500' : syncStatus === 'error' ? 'bg-rose-500' : 'bg-slate-300'}`}></div></div><div className="flex items-center gap-2"><RefreshCw size={12} className={`text-slate-400 ${isSyncing ? 'animate-spin' : ''}`} /><span className="text-[10px] font-black text-slate-700 uppercase tracking-tighter">{isSyncing ? 'Syncing...' : syncStatus === 'error' ? 'Sync Error' : syncStatus === 'success' ? 'Cloud Connected' : 'Local Storage'}</span></div>{lastSyncedAt && (<p className="text-[8px] text-slate-400 font-bold uppercase tracking-tight">Updated: {lastSyncedAt}</p>)}</div></div>
+        <div className="flex items-center justify-between px-2"><div className="flex items-center gap-4"><div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div><div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div></div><div className="relative flex items-center gap-2"><button onClick={() => setShowNotifications(!showNotifications)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative"><Bell size={22} className={stats.lowStockCount > 0 ? "animate-[pulse_2s_infinite]" : ""} />{stats.lowStockCount > 0 && (<span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-50"></span>)}</button>{showNotifications && (<div className="absolute left-full ml-4 top-0 w-72 bg-white border border-slate-200 shadow-2xl rounded-3xl z-[500] p-6 animate-in slide-in-from-left-4 overflow-hidden"><div className="flex items-center justify-between mb-4"><h4 className="text-xs font-black uppercase text-slate-400 tracking-widest">Inventory Alerts</h4><button onClick={() => setShowNotifications(false)} className="text-slate-300 hover:text-slate-500"><X size={16}/></button></div><div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1">{stats.lowStockCount > 0 ? stats.lowStockItems.map(m => (<div key={m.id} className="p-3 bg-rose-50 border border-rose-100 rounded-xl"><div className="flex justify-between items-start gap-2"><p className="text-[11px] font-black text-rose-800 leading-tight">{m.brandName}</p><span className="text-[9px] font-bold text-rose-500 whitespace-nowrap">Stock: {m.stock}</span></div><p className="text-[9px] font-bold text-rose-400 uppercase mt-1">Reorder Level: {m.reorderLevel}</p></div>)) : (<div className="py-10 text-center text-slate-300"><CheckCircle2 size={32} className="mx-auto mb-2 opacity-20" /><p className="text-[10px] font-black uppercase">All stock levels normal</p></div>)}</div>{stats.lowStockCount > 0 && (<button onClick={() => { setView('settings'); setSettingsTab('low_stock'); setShowNotifications(false); }} className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">Manage Procurement</button>)}</div>)}</div></div>
+        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} /><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} /></nav>
+        <div className="mt-auto pt-6 border-t border-slate-200">
+            <div onClick={() => handleCloudSync('backup')} className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-3 relative overflow-hidden group cursor-pointer hover:border-blue-200 transition-all active:scale-95">
+                <div className={`relative flex items-center justify-center w-10 h-10 rounded-2xl transition-all ${isSyncing || pendingSync ? 'bg-blue-50 text-blue-600' : syncStatus === 'error' ? 'bg-rose-50 text-rose-600' : syncStatus === 'preview_mode' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
+                {isSyncing || pendingSync ? (
+                    <RefreshCw size={18} className="animate-spin" />
+                ) : syncStatus === 'error' ? (
+                    <WifiOff size={18} />
+                ) : syncStatus === 'preview_mode' ? (
+                    <AlertTriangle size={18} />
+                ) : (
+                    <Cloud size={18} />
+                )}
+                {(isSyncing || pendingSync) && (
+                    <div className="absolute inset-0 bg-blue-400 rounded-2xl opacity-20 animate-subtle-pulse"></div>
+                )}
+                </div>
+                <div className="flex flex-col z-10">
+                <span className={`text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 ${isSyncing || pendingSync ? 'text-blue-600' : syncStatus === 'error' ? 'text-rose-600' : syncStatus === 'preview_mode' ? 'text-amber-600' : 'text-emerald-600'}`}>
+                    {isSyncing ? 'Syncing...' : pendingSync ? 'Saving...' : syncStatus === 'error' ? 'Offline' : syncStatus === 'preview_mode' ? 'Preview Mode' : (
+                        <>
+                            <span className="relative flex h-1.5 w-1.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                            </span>
+                            Auto-Sync Live
+                        </>
+                    )}
+                </span>
+                <span className="text-[9px] font-bold text-slate-400 mt-0.5">
+                    {isSyncing || pendingSync ? 'Uploading...' : syncStatus === 'preview_mode' ? 'Local Only' : lastSyncedAt ? `Last: ${lastSyncedAt.split(',')[1]?.trim()}` : 'Ready'}
+                </span>
+                </div>
+            </div>
+        </div>
       </aside>
 
       <main className="flex-grow p-4 md:p-12 overflow-auto print:hidden pb-24 md:pb-12">
@@ -1245,179 +1574,8 @@ const App: React.FC = () => {
                   <div className="bg-gradient-to-br from-orange-400 to-amber-500 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-amber-100 group"><p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Unpaid Clinical Fees</p><p className="text-2xl md:text-3xl font-black mt-1 flex items-center justify-between">{CURRENCY} {stats.pending.toLocaleString()}<Wallet size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p></div>
                   <div onClick={() => { setView('settings'); setSettingsTab('low_stock'); }} className="bg-gradient-to-br from-rose-500 to-pink-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-rose-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group relative overflow-hidden"><div className="relative z-10"><p className="opacity-80 text-[10px] font-bold uppercase tracking-widest">Critical Stock Alert</p><p className="text-3xl md:text-4xl font-black mt-1 flex items-center justify-between">{stats.lowStockCount}<PackageSearch size={24} className="opacity-30 group-hover:opacity-100 transition-opacity" /></p><p className="text-[8px] font-black uppercase mt-2 bg-white/20 w-fit px-2 py-0.5 rounded-full">Procurement required</p></div>{stats.lowStockCount > 0 && <span className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl animate-pulse"></span>}</div>
                   <div onClick={() => setView('visits')} className="bg-white p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] border border-slate-100 shadow-sm flex items-center justify-between cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group"><div><p className="text-slate-400 text-[10px] font-bold uppercase">Visits Today</p><p className="text-3xl md:text-4xl font-black text-slate-800">{visits.filter(v => v.date === getCurrentIsoDate()).length}</p></div><Clock size={40} className="text-blue-200 group-hover:text-blue-500 transition-colors" /></div>
-                  <div onClick={() => setView('sync')} className="bg-gradient-to-br from-blue-500 to-cyan-600 p-6 md:p-8 rounded-3xl md:rounded-[2.5rem] text-white shadow-xl shadow-blue-100 cursor-pointer hover:scale-[1.02] transition-transform active:scale-95 group"><div><p className="text-blue-100 text-[10px] font-bold uppercase">Data Protection</p><p className="text-xl md:text-2xl font-black text-white">Cloud Sync</p></div><Cloud size={40} className="text-white opacity-30 group-hover:opacity-100 transition-opacity" /></div>
                 </div>
               </div>
-           )}
-
-           {view === 'sync' && (
-             <div className="space-y-8 animate-in fade-in">
-                <div className="flex justify-between items-center">
-                  <h1 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3"><Cloud className="text-blue-600" size={32}/> Cross-Device Sync</h1>
-                  <div className="flex gap-2">
-                    <button onClick={() => setShowSyncHelp(true)} className="flex items-center gap-2 text-blue-600 hover:bg-blue-50 px-4 py-2 rounded-xl font-black uppercase text-xs transition-all"><HelpCircle size={18} /> Setup Guide</button>
-                    <button onClick={() => setView('dashboard')} className="flex items-center gap-2 text-slate-400 hover:text-blue-600 font-black uppercase text-xs px-4 py-2"><ArrowRight className="rotate-180" size={18} /> Dashboard</button>
-                  </div>
-                </div>
-                
-                {syncStatus !== 'idle' && (
-                  <div className={`p-6 rounded-[2rem] border-2 flex items-center gap-4 animate-in slide-in-from-top-4 ${syncStatus === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' : 'bg-rose-50 border-rose-100 text-rose-800'}`}>
-                    {syncStatus === 'success' ? <ShieldCheck size={28} className="text-emerald-500" /> : <AlertTriangle size={28} className="text-rose-500" />}
-                    <div>
-                      <p className="font-black text-sm uppercase tracking-widest">{syncStatus === 'success' ? 'Synchronization Successful' : 'Transmission Failure'}</p>
-                      <p className="text-xs font-bold opacity-80">{syncStatusMessage}</p>
-                    </div>
-                    <button onClick={() => setSyncStatus('idle')} className="ml-auto text-current opacity-40 hover:opacity-100"><X size={20}/></button>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="bg-white p-8 md:p-12 rounded-[3rem] border border-slate-100 shadow-xl space-y-10">
-                    <div className="space-y-8">
-                      <div className="flex items-center gap-4">
-                        <div className="p-4 bg-blue-50 text-blue-600 rounded-3xl"><Building2 size={32} /></div>
-                        <div>
-                          <h2 className="text-2xl font-black text-slate-800">Clinic Identity</h2>
-                          <p className="text-slate-400 text-sm font-medium">Use this code to authorize secondary devices (Mobiles, Tablets) to access your records.</p>
-                        </div>
-                      </div>
-
-                      <div className="p-10 bg-gradient-to-br from-slate-900 to-indigo-950 rounded-[3rem] relative group overflow-hidden shadow-2xl shadow-indigo-200">
-                        <div className="relative z-10 flex flex-col items-center gap-6 text-center">
-                          <p className="text-[10px] font-black uppercase text-blue-400/60 tracking-[0.4em]">Personal Clinic Sync Code</p>
-                          <div className="flex flex-col items-center gap-2">
-                             <p className="text-6xl md:text-7xl font-black text-white tracking-tighter tabular-nums select-all cursor-copy hover:scale-105 transition-transform" onClick={copySyncCode}>
-                               {clinicSyncCode}
-                             </p>
-                          </div>
-                          <button onClick={copySyncCode} className="flex items-center gap-3 px-8 py-4 bg-white text-indigo-950 rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-blue-50 transition-all shadow-xl active:scale-95 group/btn">
-                            <Copy size={18} className="text-blue-600 group-hover/btn:scale-110 transition-transform"/> Copy Clinic Code
-                          </button>
-                        </div>
-                        <div className="absolute -right-8 -bottom-8 opacity-10 group-hover:opacity-20 transition-opacity">
-                           <QrCode size={200} className="text-white"/>
-                        </div>
-                      </div>
-
-                      <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 space-y-6">
-                        <div className="flex items-center justify-between">
-                           <div className="flex items-center gap-3">
-                              <Zap size={20} className={isAutoSyncEnabled ? "text-emerald-500" : "text-slate-300"} />
-                              <div>
-                                 <h4 className="font-black text-slate-800 text-sm">Real-time Auto Sync</h4>
-                                 <p className="text-[10px] text-slate-500">Backup and share automatically on every change</p>
-                              </div>
-                           </div>
-                           <button onClick={() => setIsAutoSyncEnabled(!isAutoSyncEnabled)} className="focus:outline-none">
-                              {isAutoSyncEnabled ? <ToggleOn size={32} className="text-emerald-500" /> : <Toggle size={32} className="text-slate-300" />}
-                           </button>
-                        </div>
-
-                        <div className="space-y-3 pt-2">
-                           <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                              <Globe2 size={14} className="text-blue-500" /> Your Cloud URL (API Gateway)
-                           </label>
-                           <input 
-                              type="text" 
-                              value={syncEndpoint} 
-                              onChange={(e) => setSyncEndpoint(e.target.value)} 
-                              placeholder="https://yourdomain.com/sync.php" 
-                              className="w-full p-4 rounded-xl border-2 border-slate-200 bg-white font-bold text-xs outline-none focus:border-blue-500 transition-all" 
-                           />
-                           <p className="text-[9px] text-slate-400 italic">Upload 'sync.php' to your host and enter the link here.</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4">
-                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex items-center gap-2">
-                          <SmartphoneNfc size={14} className="text-blue-500" /> Join Existing Clinic Network
-                        </label>
-                        <div className="flex gap-2">
-                          <input 
-                            type="text" 
-                            value={joinCode} 
-                            onChange={(e) => setJoinCode(e.target.value.toUpperCase())} 
-                            placeholder="Enter Code from another device" 
-                            className="flex-grow p-5 rounded-2xl border-2 border-slate-100 bg-white font-black text-base outline-none focus:border-blue-500 transition-all" 
-                          />
-                          <button 
-                            onClick={() => handleCloudSync('restore')} 
-                            disabled={!joinCode || isSyncing} 
-                            className="px-8 bg-slate-900 text-white rounded-2xl font-black uppercase text-[11px] tracking-widest hover:bg-blue-600 disabled:opacity-20 shadow-lg"
-                          >
-                            Pull Records
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-50 p-8 md:p-12 rounded-[3rem] border border-slate-200 shadow-sm space-y-10 flex flex-col">
-                    <div className="space-y-8 flex-grow">
-                      <div className="flex items-center gap-4">
-                        <div className={`p-4 rounded-3xl ${isSyncing ? 'bg-blue-600 text-white' : 'bg-white text-slate-400 border border-slate-100'}`}>
-                          {isSyncing ? <RefreshCw className="animate-spin" size={32} /> : <Database size={32} />}
-                        </div>
-                        <div>
-                          <h2 className="text-2xl font-black text-slate-800">{isSyncing ? 'Sync in Progress' : 'Cloud Status'}</h2>
-                          <p className="text-slate-500 text-sm font-medium">Monitoring manual and automated cloud transactions.</p>
-                        </div>
-                      </div>
-
-                      {isSyncing ? (
-                        <div className="space-y-8 py-4 animate-in fade-in">
-                          <div className="space-y-3">
-                             <div className="flex justify-between items-end">
-                                <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest animate-pulse">{syncStatusMessage}</span>
-                                <span className="text-sm font-black text-slate-800">{syncProgress}%</span>
-                             </div>
-                             <div className="h-4 w-full bg-slate-200 rounded-full overflow-hidden p-1 shadow-inner">
-                                <div 
-                                  className="h-full bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full transition-all duration-500" 
-                                  style={{ width: `${syncProgress}%` }}
-                                />
-                             </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                           <div className="grid grid-cols-2 gap-4">
-                              <div className="p-6 bg-white border border-slate-100 rounded-3xl space-y-2">
-                                 <p className="text-[10px] font-black uppercase text-slate-400">Last Successful Sync</p>
-                                 <p className="text-sm font-black text-slate-800">{lastSyncedAt || 'Never synced'}</p>
-                              </div>
-                              <div className="p-6 bg-white border border-slate-100 rounded-3xl space-y-2">
-                                 <p className="text-[10px] font-black uppercase text-slate-400">Cloud Link</p>
-                                 <div className="flex items-center gap-2">
-                                    <span className={`w-2 h-2 rounded-full ${isAutoSyncEnabled ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse' : 'bg-slate-300'}`}></span>
-                                    <p className="text-xs font-black text-slate-800 uppercase">{isAutoSyncEnabled ? 'Active' : 'Disconnected'}</p>
-                                 </div>
-                              </div>
-                           </div>
-
-                           <div className="p-6 bg-blue-50 border border-blue-100 rounded-3xl flex items-start gap-4">
-                              <Info className="text-blue-500 shrink-0" size={20}/>
-                              <p className="text-xs font-bold text-blue-800 leading-relaxed">
-                                 Your data is shared via the "Clinic Sync Code". If you change phone or computer, simply enter the code on the new device to recover everything.
-                              </p>
-                           </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-col gap-4">
-                      <button 
-                        onClick={() => handleCloudSync('backup')} 
-                        disabled={isSyncing} 
-                        className="flex items-center justify-center gap-3 py-6 bg-blue-600 hover:bg-blue-700 text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-sm transition-all active:scale-95 shadow-2xl shadow-blue-200 disabled:opacity-50"
-                      >
-                        {isSyncing ? <RefreshCw className="animate-spin" size={20}/> : <UploadCloud size={20} />}
-                        Push Local Data to Cloud
-                      </button>
-                    </div>
-                  </div>
-                </div>
-             </div>
            )}
 
            {view === 'analytics' && (
@@ -1461,8 +1619,8 @@ const App: React.FC = () => {
              <div className="space-y-6 md:space-y-8 animate-in fade-in">
                 <div className="flex flex-col gap-4">
                   <div className="flex justify-between items-center"><h1 className="text-2xl font-black text-slate-800">Settings</h1>{settingsTab === 'meds' && (<div className="flex gap-1"><button onClick={exportMedsCsv} className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all" title="Export Meds (CSV)"><FileDown size={18} /></button><label className="p-2.5 bg-white border border-slate-100 text-slate-400 hover:text-blue-600 rounded-xl shadow-sm transition-all cursor-pointer" title="Import Meds (CSV)"><FileUp size={18} /><input type="file" accept=".csv" className="hidden" onChange={handleImportMedsCsv} /></label></div>)}</div>
-                  <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">{[{ id: 'appearance', label: 'Font System', icon: <Type size={12} className="text-blue-500"/> },{ id: 'low_stock', label: 'Critical Stock', icon: <ShieldAlert size={12} className="text-rose-500"/> },{ id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> },{ id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> },{ id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> },{ id: 'meds', label: 'Medicines', icon: <Pill size={12}/> },{ id: 'scientific', label: 'Scientific', icon: <FlaskConical size={12}/> },{ id: 'companies', label: 'Companies', icon: <Building2 size={12}/> },{ id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> },{ id: 'med_types', label: 'Types', icon: <Tags size={12}/> }].map(tab => (<button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap relative ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}{tab.id === 'low_stock' && stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>)}</button>))}</div>
-                  {settingsTab !== 'appearance' && (
+                  <div className="flex gap-2 bg-slate-200/50 p-1 rounded-xl w-full overflow-x-auto no-scrollbar scroll-smooth">{[{ id: 'appearance', label: 'Font System', icon: <Type size={12} className="text-blue-500"/> },{ id: 'sync', label: 'Cloud Sync', icon: <RefreshCw size={12} className="text-emerald-500"/> },{ id: 'low_stock', label: 'Critical Stock', icon: <ShieldAlert size={12} className="text-rose-500"/> },{ id: 'vitals', label: 'Vitals', icon: <Activity size={12}/> },{ id: 'symptoms', label: 'Symptoms', icon: <Droplets size={12}/> },{ id: 'templates', label: 'Templates', icon: <LayoutTemplate size={12}/> },{ id: 'meds', label: 'Medicines', icon: <Pill size={12}/> },{ id: 'scientific', label: 'Scientific', icon: <FlaskConical size={12}/> },{ id: 'companies', label: 'Companies', icon: <Building2 size={12}/> },{ id: 'med_categories', label: 'Cats', icon: <Layers size={12}/> },{ id: 'med_types', label: 'Types', icon: <Tags size={12}/> }].map(tab => (<button key={tab.id} onClick={() => { setSettingsTab(tab.id as any); setSettingsSearchTerm(''); }} className={`px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all flex items-center gap-2 whitespace-nowrap relative ${settingsTab === tab.id ? 'bg-white shadow text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}>{tab.icon} {tab.label}{tab.id === 'low_stock' && stats.lowStockCount > 0 && (<span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>)}</button>))}</div>
+                  {settingsTab !== 'appearance' && settingsTab !== 'sync' && (
                     <div className="flex flex-col sm:flex-row gap-4">
                       <div className="relative flex-grow group"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} /><input type="text" placeholder={`Deep Search in ${settingsTab}...`} value={settingsSearchTerm} onChange={(e) => setSettingsSearchTerm(e.target.value)} className="w-full pl-10 pr-10 py-2.5 rounded-xl border-2 border-slate-100 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 outline-none font-bold transition-all text-sm shadow-sm" />{settingsSearchTerm && <button onClick={() => setSettingsSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"><X size={14}/></button>}</div>
                     </div>
@@ -1471,31 +1629,65 @@ const App: React.FC = () => {
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 animate-in slide-in-from-bottom-4">
                   {settingsTab === 'appearance' && (<div className="col-span-full bg-white p-8 md:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-10"><div className="flex items-center gap-4"><div className="p-4 bg-blue-50 text-blue-600 rounded-3xl"><Type size={32} /></div><div><h2 className="text-2xl font-black text-slate-800">Application Text Scale</h2><p className="text-slate-400 text-sm font-medium">Customize the global font size for better readability across all clinic modules.</p></div></div><div className="grid grid-cols-2 md:grid-cols-4 gap-4">{[{ label: 'Small', size: 14 },{ label: 'Normal', size: 16 },{ label: 'Large', size: 18 },{ label: 'X-Large', size: 20 }].map((opt) => (<button key={opt.size} onClick={() => setFontSize(opt.size)} className={`p-8 rounded-[2rem] border-4 transition-all flex flex-col items-center gap-3 active:scale-95 ${fontSize === opt.size ? 'border-blue-600 bg-blue-50 text-blue-600 shadow-xl shadow-blue-100' : 'border-slate-50 bg-slate-50 text-slate-400 hover:border-slate-100'}`}><span className="font-black" style={{ fontSize: `${opt.size}px` }}>Aa</span><span className="text-[10px] font-black uppercase tracking-widest">{opt.label}</span></button>))}</div><div className="p-6 bg-slate-50 rounded-2xl border border-slate-100"><p className="text-[10px] font-bold text-slate-400 uppercase mb-2">Live Preview Area:</p><p className="font-medium text-slate-700">یہاں اردو اور انگریزی متن کا نمونہ دکھایا گیا ہے۔ منتخب کردہ سائز کے مطابق یہ متن تبدیل ہوگا۔</p><p className="text-xs text-slate-400 italic mt-2">Changes are applied immediately and saved to your browser's local storage.</p></div></div>)}
-                  {settingsTab !== 'low_stock' && settingsTab !== 'appearance' && (<button onClick={() => { if(settingsTab === 'templates') setShowTemplateForm(true); else if(settingsTab === 'symptoms') setShowSymptomForm(true); else if(settingsTab === 'scientific') setShowScientificForm(true); else if(settingsTab === 'companies') setShowCompanyForm(true); else if(settingsTab === 'med_categories') setShowCategoryForm(true); else if(settingsTab === 'med_types') setShowTypeForm(true); else if(settingsTab === 'vitals') setShowVitalDefForm(true); else if(settingsTab === 'meds') setShowMedForm(true); }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]"><Plus size={32} /><span className="font-black uppercase tracking-widest text-[9px]">Add New</span></button>)}
-                  {settingsTab !== 'appearance' && filteredSettingsItems.map(item => { const brands = (settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') ? (settingsTab === 'scientific' ? getBrandsForScientific(item.label) : settingsTab === 'companies' ? getBrandsForCompany(item.label) : settingsTab === 'med_categories' ? getBrandsForCategory(item.label) : getBrandsForType(item.label)) : []; const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock'; const med = item as Medication; const tpl = settingsTab === 'templates' ? item as PrescriptionTemplate : null; return (<div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}><div><div className="flex justify-between items-start gap-2"><h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}</h3>{tpl && (tpl.minAge !== undefined || tpl.maxAge !== undefined) && (<span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[8px] font-black uppercase whitespace-nowrap">Age: {tpl.minAge || 0}-{tpl.maxAge || 120}Y</span>)}</div>{(item.diagnosis || item.scientificName) && (<p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}{isMedLike && med.category && ` • ${med.category}`}{isMedLike && med.type && ` • ${med.type}`}</p>)}{brands.length > 0 && (<div className="mt-3"><p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Registered Medicines</p><div className="flex flex-wrap gap-1">{brands.map((b, idx) => (<span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>))}</div></div>)}{isMedLike && (<div className="mt-3 space-y-1"><p className={`text-[9px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-600' : 'text-slate-500'}`}>Current Stock: {med.stock} {med.unit}</p><p className="text-[8px] font-bold text-slate-400 uppercase">Alert Level: {med.reorderLevel}</p>{med.stock <= med.reorderLevel && (<div className="mt-2 flex items-center gap-1.5 text-rose-500 animate-pulse"><AlertTriangle size={10} /><span className="text-[8px] font-black uppercase">Low Stock Critical</span></div>)}</div>)}</div><div className="mt-4 pt-3 border-t flex justify-end gap-1"><button onClick={() => { if(settingsTab === 'templates') { setEditingTemplate(item); setTempPrescribedMeds(item.prescribedMeds); setFormDiagnosis(item.diagnosis); setShowTemplateForm(true); } else if(settingsTab === 'symptoms') { setEditingSymptom(item); setShowSymptomForm(true); } else if(settingsTab === 'scientific') { setEditingScientificName(item); setShowScientificForm(true); } else if(settingsTab === 'companies') { setEditingCompanyName(item); setShowCompanyForm(true); } else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); } else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); } else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); } else if(isMedLike) { setEditingMedication(med); setShowMedForm(true); } }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button><button onClick={() => { if(settingsTab === 'templates') { setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'symptoms') { setSymptoms(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'scientific') { setScientificNames(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'companies') { setCompanyNames(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'med_categories') { setMedCategories(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'med_types') { setMedTypes(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'vitals') { setVitalDefinitions(prev => prev.filter(i => i.id !== item.id)); } else if(isMedLike) { setMedications(prev => prev.filter(i => i.id !== item.id)); } }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button></div></div>)})}
+                  {settingsTab === 'sync' && (
+                    <div className="col-span-full bg-white p-8 md:p-12 rounded-[2.5rem] border border-slate-100 shadow-sm space-y-10">
+                        <div className="flex items-center gap-4">
+                            <div className="p-4 bg-emerald-50 text-emerald-600 rounded-3xl"><RefreshCw size={32} /></div>
+                            <div>
+                                <h2 className="text-2xl font-black text-slate-800">Cloud Synchronization</h2>
+                                <p className="text-slate-400 text-sm font-medium">Manage your data sync status and troubleshoot connection issues.</p>
+                            </div>
+                        </div>
+
+                        {/* Database Setup Section */}
+                        <div className="p-6 bg-indigo-50 rounded-2xl border border-indigo-100 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-black text-indigo-900">One-Click Database Setup</h3>
+                                <span className="text-[10px] font-bold text-indigo-500 bg-white px-2 py-1 rounded uppercase">Setup</span>
+                            </div>
+                            <p className="text-sm text-indigo-700">Automatically create all necessary database tables on your server. Use this if you are setting up the app for the first time.</p>
+                            <button onClick={handleDbInstall} className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200">Create Tables</button>
+                        </div>
+
+                        {/* Deployment Instructions Section */}
+                        <div className="p-6 bg-emerald-50 rounded-2xl border border-emerald-100 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-black text-emerald-900">Deployment Instructions</h3>
+                                <span className="text-[10px] font-bold text-emerald-500 bg-white px-2 py-1 rounded uppercase">Guide</span>
+                            </div>
+                            <div className="text-sm text-emerald-800 space-y-2">
+                                <p className="font-bold">How to deploy this app to your own server:</p>
+                                <ol className="list-decimal pl-5 space-y-1">
+                                    <li>Upload <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">sync.php</code> and <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">config.php</code> to your web hosting (e.g., cPanel public_html).</li>
+                                    <li>Create a MySQL database on your hosting and update <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">config.php</code> with the database name, user, and password.</li>
+                                    <li>Update the <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">SYNC_URL</code> in the frontend code (<code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">App.tsx</code> line 29) to point to your uploaded <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">sync.php</code> file.</li>
+                                    <li>Build the frontend app using <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">npm run build</code>.</li>
+                                    <li>Upload the contents of the generated <code className="bg-white px-1 py-0.5 rounded text-emerald-900 font-mono text-xs">dist</code> folder to your web hosting.</li>
+                                    <li>Open your app URL and click <strong>"Create Tables"</strong> above to initialize the database.</li>
+                                </ol>
+                            </div>
+                        </div>
+
+                        {/* Force Resync Section */}
+                        <div className="p-6 bg-slate-50 rounded-2xl border border-slate-100 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <h3 className="font-black text-slate-800">Force Full Resync</h3>
+                                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded uppercase">Advanced</span>
+                            </div>
+                            <p className="text-sm text-slate-600">If you notice data discrepancies between devices, use this to clear local sync memory and fetch a fresh copy from the cloud.</p>
+                            <button onClick={async () => { if (confirm("This will clear your local sync memory and fetch a fresh copy from the cloud. Use this if devices are out of sync. Continue?")) { localStorage.removeItem('smartclinic_basestate'); baseStateRef.current = {}; await handleCloudSync('restore'); alert("Resync complete."); } }} className="px-6 py-3 bg-white border-2 border-rose-100 text-rose-600 rounded-xl font-black uppercase text-[10px] tracking-widest hover:bg-rose-50 transition-all shadow-sm">Start Force Resync</button>
+                        </div>
+                    </div>
+                  )}
+                  {settingsTab !== 'low_stock' && settingsTab !== 'appearance' && settingsTab !== 'sync' && (<button onClick={() => { if(settingsTab === 'templates') setShowTemplateForm(true); else if(settingsTab === 'symptoms') setShowSymptomForm(true); else if(settingsTab === 'scientific') setShowScientificForm(true); else if(settingsTab === 'companies') setShowCompanyForm(true); else if(settingsTab === 'med_categories') setShowCategoryForm(true); else if(settingsTab === 'med_types') setShowTypeForm(true); else if(settingsTab === 'vitals') setShowVitalDefForm(true); else if(settingsTab === 'meds') setShowMedForm(true); }} className="border-4 border-dashed border-slate-200 rounded-3xl p-8 text-slate-300 flex flex-col items-center justify-center gap-2 hover:border-blue-500 hover:text-blue-500 transition-all active:scale-95 min-h-[140px]"><Plus size={32} /><span className="font-black uppercase tracking-widest text-[9px]">Add New</span></button>)}
+                  {settingsTab !== 'appearance' && settingsTab !== 'sync' && filteredSettingsItems.map(item => { const brands = (settingsTab === 'scientific' || settingsTab === 'companies' || settingsTab === 'med_categories' || settingsTab === 'med_types') ? (settingsTab === 'scientific' ? getBrandsForScientific(item.label) : settingsTab === 'companies' ? getBrandsForCompany(item.label) : settingsTab === 'med_categories' ? getBrandsForCategory(item.label) : getBrandsForType(item.label)) : []; const isMedLike = settingsTab === 'meds' || settingsTab === 'low_stock'; const med = item as Medication; const tpl = settingsTab === 'templates' ? item as PrescriptionTemplate : null; return (<div key={item.id} className={`bg-white p-5 rounded-3xl border transition-all flex flex-col justify-between group ${settingsTab === 'low_stock' ? 'border-rose-100 shadow-rose-50' : 'border-slate-100 shadow-sm'}`}><div><div className="flex justify-between items-start gap-2"><h3 className="font-black text-slate-800 text-sm md:text-base leading-tight truncate">{item.name || (item.brandName ? `${item.brandName}${med.companyName ? ` (${med.companyName})` : ''}` : item.label)}</h3>{tpl && (tpl.minAge !== undefined || tpl.maxAge !== undefined) && (<span className="bg-blue-50 text-blue-600 px-2 py-0.5 rounded-lg text-[8px] font-black uppercase whitespace-nowrap">Age: {tpl.minAge || 0}-{tpl.maxAge || 120}Y</span>)}</div>{(item.diagnosis || item.scientificName) && (<p className="text-[10px] text-slate-400 italic mt-1 truncate">{item.diagnosis || item.scientificName}{isMedLike && med.category && ` • ${med.category}`}{isMedLike && med.type && ` • ${med.type}`}</p>)}{brands.length > 0 && (<div className="mt-3"><p className="text-[8px] font-black uppercase text-blue-400 mb-1 tracking-tighter">Registered Medicines</p><div className="flex flex-wrap gap-1">{brands.map((b, idx) => (<span key={idx} className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[9px] font-bold border border-blue-100">{b}</span>))}</div></div>)}{isMedLike && (<div className="mt-3 space-y-1"><p className={`text-[9px] font-black uppercase ${med.stock <= med.reorderLevel ? 'text-rose-600' : 'text-slate-500'}`}>Current Stock: {med.stock} {med.unit}</p><p className="text-[8px] font-bold text-slate-400 uppercase">Alert Level: {med.reorderLevel}</p>{med.stock <= med.reorderLevel && (<div className="mt-2 flex items-center gap-1.5 text-rose-500 animate-pulse"><AlertTriangle size={10} /><span className="text-[8px] font-black uppercase">Low Stock Critical</span></div>)}</div>)}</div><div className="mt-4 pt-3 border-t flex justify-end gap-1"><button onClick={() => { if(settingsTab === 'templates') { setEditingTemplate(item); setTempPrescribedMeds(item.prescribedMeds); setFormDiagnosis(item.diagnosis); setShowTemplateForm(true); } else if(settingsTab === 'symptoms') { setEditingSymptom(item); setShowSymptomForm(true); } else if(settingsTab === 'scientific') { setEditingScientificName(item); setShowScientificForm(true); } else if(settingsTab === 'companies') { setEditingCompanyName(item); setShowCompanyForm(true); } else if(settingsTab === 'med_categories') { setEditingMedCategory(item); setShowCategoryForm(true); } else if(settingsTab === 'med_types') { setEditingMedType(item); setShowTypeForm(true); } else if(settingsTab === 'vitals') { setEditingVitalDefinition(item); setShowVitalDefForm(true); } else if(isMedLike) { setEditingMedication(med); setShowMedForm(true); } }} className="p-2 text-slate-300 hover:text-blue-500 transition-colors"><Edit2 size={16}/></button><button onClick={() => { pendingDeletions.current.push({id: item.id, type: settingsTab === 'meds' ? 'medications' : settingsTab}); if(settingsTab === 'templates') { setPrescriptionTemplates(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'symptoms') { setSymptoms(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'scientific') { setScientificNames(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'companies') { setCompanyNames(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'med_categories') { setMedCategories(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'med_types') { setMedTypes(prev => prev.filter(i => i.id !== item.id)); } else if(settingsTab === 'vitals') { setVitalDefinitions(prev => prev.filter(i => i.id !== item.id)); } else if(isMedLike) { setMedications(prev => prev.filter(i => i.id !== item.id)); } }} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16}/></button></div></div>)})}
                 </div>
              </div>
            )}
         </div>
       </main>
 
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-2 flex items-center justify-between z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] print:hidden"><button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'dashboard' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><LayoutDashboard size={18} /><span className="text-[8px] font-black uppercase">Home</span></button><button onClick={() => setView('patients')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'patients' || view === 'patient-detail' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Users size={18} /><span className="text-[8px] font-black uppercase">Files</span></button><button onClick={() => setView('visits')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'visits' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><ClipboardList size={18} /><span className="text-[8px] font-black uppercase">Logs</span></button><button onClick={() => setView('pharmacy')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'pharmacy' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Pill size={18} /><span className="text-[8px] font-black uppercase">Med</span></button><button onClick={() => setView('sync')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'sync' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Cloud size={18} /><span className="text-[8px] font-black uppercase">Sync</span></button><button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'settings' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Settings size={18} /><span className="text-[8px] font-black uppercase">Setup</span></button></nav>
-
-      {showSyncHelp && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[800] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowSyncHelp(false)}>
-          <div className="bg-white w-full max-w-2xl rounded-[3rem] p-10 shadow-2xl space-y-8 animate-in zoom-in" onClick={e => e.stopPropagation()}>
-             <div className="flex justify-between items-center"><h2 className="text-2xl font-black text-slate-800">Cross-Device Setup Guide</h2><button onClick={() => setShowSyncHelp(false)} className="text-3xl hover:text-blue-600 transition-colors">&times;</button></div>
-             <div className="space-y-6">
-                <div className="flex gap-4"><div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-black shrink-0">1</div><p className="text-sm font-bold text-slate-600">Upload the <code className="bg-slate-100 px-1.5 py-0.5 rounded text-blue-600">sync.php</code> file to your web server (e.g. public_html folder).</p></div>
-                <div className="flex gap-4"><div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-black shrink-0">2</div><p className="text-sm font-bold text-slate-600">Enter the full link to that file in the <b>Cloud URL</b> box (e.g. <code>https://myclinic.com/sync.php</code>).</p></div>
-                <div className="flex gap-4"><div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-black shrink-0">3</div><p className="text-sm font-bold text-slate-600">Turn on <b>Auto Sync</b>. Your data is now being stored in your private cloud.</p></div>
-                <div className="flex gap-4"><div className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center font-black shrink-0">4</div><p className="text-sm font-bold text-slate-600">Open this website on your <b>Mobile Phone</b>. Go to Sync tab, enter your <b>Clinic Sync Code</b> and click <b>Pull Records</b>.</p></div>
-                <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100"><p className="text-xs font-black text-blue-700 uppercase mb-2">Why do this?</p><p className="text-xs text-blue-600 leading-relaxed font-bold italic">This allows you to check patient history from your home and log visits in the clinic simultaneously. Your data stays 100% private on your own hosting.</p></div>
-             </div>
-             <button onClick={() => setShowSyncHelp(false)} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase text-xs tracking-widest hover:bg-blue-600 transition-all">Understood</button>
-          </div>
-        </div>
-      )}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-2 flex items-center justify-between z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] print:hidden"><button onClick={() => setView('dashboard')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'dashboard' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><LayoutDashboard size={18} /><span className="text-[8px] font-black uppercase">Home</span></button><button onClick={() => setView('patients')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'patients' || view === 'patient-detail' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Users size={18} /><span className="text-[8px] font-black uppercase">Files</span></button><button onClick={() => setView('visits')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'visits' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><ClipboardList size={18} /><span className="text-[8px] font-black uppercase">Logs</span></button><button onClick={() => setView('pharmacy')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'pharmacy' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Pill size={18} /><span className="text-[8px] font-black uppercase">Med</span></button><button onClick={() => setView('settings')} className={`flex flex-col items-center gap-1 transition-all flex-1 ${view === 'settings' ? 'text-blue-600 scale-110' : 'text-slate-400 hover:text-slate-600'}`}><Settings size={18} /><span className="text-[8px] font-black uppercase">Setup</span></button></nav>
 
       {selectedSaleForReceipt && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[700] flex items-center justify-center p-0 sm:p-4 animate-in zoom-in" onClick={() => setSelectedSaleForReceipt(null)}><div className="bg-white w-full h-full sm:h-auto sm:max-w-2xl sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}><div className="p-6 md:p-8 bg-indigo-600 text-white flex justify-between items-center shrink-0"><div className="flex items-center gap-3"><Receipt size={24} /><div><h2 className="text-xl font-black tracking-tight">Sales Receipt</h2><p className="text-[10px] font-bold opacity-70 uppercase tracking-widest">ID: {selectedSaleForReceipt.id.toUpperCase()}</p></div></div><button onClick={() => setSelectedSaleForReceipt(null)} className="text-3xl hover:opacity-70 transition-opacity">&times;</button></div><div className="p-6 md:p-10 space-y-8 flex-grow overflow-y-auto custom-scrollbar"><div className="flex justify-between items-end border-b-2 border-slate-50 pb-6"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Customer Details</p><p className="text-lg font-black text-slate-800">{selectedSaleForReceipt.customerName}</p><p className="text-xs font-bold text-slate-500">{formatDate(selectedSaleForReceipt.date)}</p></div><div className="text-right"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Payment Status</p><span className="px-4 py-1 bg-emerald-100 text-emerald-600 rounded-full font-black text-[10px] uppercase">Paid</span></div></div><div className="space-y-4"><table className="w-full text-left"><thead className="text-[9px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-100"><tr><th className="py-3">Medicine (Formula - Strength)</th><th className="py-3 text-center">Qty</th><th className="py-3 text-right">Subtotal</th></tr></thead><tbody className="divide-y divide-slate-50">{selectedSaleForReceipt.items.map((item, idx) => { const med = medications.find(m => m.id === item.medicationId); return (<tr key={idx} className="text-xs"><td className="py-4"><p className="font-black text-slate-800">{med?.brandName || 'Unknown Med'}</p><p className="text-[9px] font-bold text-slate-400 italic">({med?.scientificName}) - {med?.strength}</p></td><td className="py-4 text-center font-black text-slate-600">{item.quantity}</td><td className="py-4 text-right font-black text-slate-800">{CURRENCY} {(item.quantity * item.priceAtTime).toLocaleString()}</td></tr>); })}</tbody></table></div><div className="pt-6 border-t-4 border-dashed border-slate-100 flex flex-col items-end gap-2"><div className="flex flex-col items-end"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Quantity</span><p className="text-xl font-black text-slate-600">{selectedSaleForReceipt.items.reduce((sum, item) => sum + item.quantity, 0)} Items</p></div><div className="flex flex-col items-end mt-2"><span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Grand Total</span><p className="text-4xl font-black text-indigo-600 tabular-nums">{CURRENCY} {selectedSaleForReceipt.totalAmount.toLocaleString()}</p></div></div></div><div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3"><button onClick={() => window.print()} className="flex-1 py-4 bg-white border-2 border-slate-200 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 hover:bg-slate-100 transition-all"><Printer size={16}/> Print Copy</button><button onClick={() => setSelectedSaleForReceipt(null)} className="flex-1 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] shadow-lg shadow-indigo-100 active:scale-95 transition-all">Close</button></div></div></div>)}
       {qrVisit && (<div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4" onClick={() => setQrVisit(null)}><div className="bg-white w-full h-full sm:h-auto sm:max-w-md sm:rounded-[3.5rem] p-8 md:p-12 shadow-2xl flex flex-col items-center text-center gap-6 animate-in zoom-in" onClick={e => e.stopPropagation()}><div className="w-full flex justify-end sm:hidden"><button onClick={() => setQrVisit(null)} className="text-slate-400 text-3xl">&times;</button></div><div className="bg-indigo-50 p-6 rounded-3xl text-indigo-600 shadow-inner"><QrCode size={48} /></div><div><h2 className="text-xl md:text-2xl font-black text-slate-800">Scan Visit QR</h2></div><div className="p-3 md:p-4 bg-white border-8 border-slate-50 rounded-3xl shadow-lg"><QRCodeCanvas id="modal-visit-qr" value={getVisitQrData(qrVisit)} size={200} level="M" /></div><div className="text-left w-full text-xs text-slate-500 bg-slate-50 p-4 rounded-2xl whitespace-pre-wrap font-mono">{getVisitQrData(qrVisit)}</div><div className="flex gap-2 w-full"><button onClick={() => downloadQrCode('modal-visit-qr', `Visit_QR_${qrVisit.id}`)} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-blue-700 transition-all flex items-center justify-center gap-2"><Download size={14}/> Save Image</button><button onClick={() => setQrVisit(null)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-slate-200 transition-all">Dismiss</button></div></div></div>)}
@@ -1664,7 +1856,7 @@ const App: React.FC = () => {
         { show: showCompanyForm, set: setShowCompanyForm, editing: editingCompanyName, setEditing: setEditingCompanyName, title: 'Company', color: 'amber', list: companyNames, setList: setCompanyNames },
         { show: showCategoryForm, set: setShowCategoryForm, editing: editingMedCategory, setEditing: setEditingMedCategory, title: 'Category', color: 'indigo', list: medCategories, setList: setMedCategories },
         { show: showTypeForm, set: setShowTypeForm, editing: editingMedType, setEditing: setEditingMedType, title: 'Med Type', color: 'blue', list: medTypes, setList: setMedTypes }
-      ].map(modal => modal.show && (<div key={modal.title} className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4"><div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden"><div className={`p-5 bg-${modal.color}-600 text-white flex justify-between items-center`}><h2 className="font-black uppercase tracking-widest text-[10px]">{modal.editing ? `Edit ${modal.title}` : `New ${modal.title}`}</h2><button onClick={() => { modal.set(false); modal.setEditing(null); }} className="text-xl">&times;</button></div><form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const label = f.get('label') as string; if (modal.editing) modal.setList((prev:any) => prev.map((i:any) => i.id === modal.editing.id ? { ...i, label } : i)); else if (label) modal.setList((prev:any) => [...prev, { id: Math.random().toString(36).substr(2, 9), label }]); modal.set(false); modal.setEditing(null); }} className="p-5 space-y-4"><input required name="label" defaultValue={modal.editing?.label} placeholder={`${modal.title} name...`} className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" autoFocus /><button type="submit" className={`w-full bg-${modal.color}-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs`}>Save</button></form></div></div>))}
+      ].map(modal => modal.show && (<div key={modal.title} className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4"><div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden"><div className={`p-5 bg-${modal.color}-600 text-white flex justify-between items-center`}><h2 className="font-black uppercase tracking-widest text-[10px]">{modal.editing ? `Edit ${modal.title}` : `New ${modal.title}`}</h2><button onClick={() => { modal.set(false); modal.setEditing(null); }} className="text-xl">&times;</button></div><form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const label = f.get('label') as string; if (modal.editing) modal.setList((prev:any) => prev.map((i:any) => i.id === modal.editing?.id ? { ...i, label } : i)); else if (label) modal.setList((prev:any) => [...prev, { id: Math.random().toString(36).substr(2, 9), label }]); modal.set(false); modal.setEditing(null); }} className="p-5 space-y-4"><input required name="label" defaultValue={modal.editing?.label} placeholder={`${modal.title} name...`} className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" autoFocus /><button type="submit" className={`w-full bg-${modal.color}-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs`}>Save</button></form></div></div>))}
       {showVitalDefForm && (<div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[700] flex items-center justify-center p-4"><div className="bg-white w-full max-w-xs rounded-3xl shadow-2xl border-4 border-white animate-in zoom-in overflow-hidden"><div className="p-5 bg-rose-600 text-white flex justify-between items-center"><h2 className="font-black uppercase tracking-widest text-[10px]">{editingVitalDefinition ? 'Edit Vital' : 'New Vital'}</h2><button onClick={() => { setShowVitalDefForm(false); setEditingVitalDefinition(null); }} className="text-xl">&times;</button></div><form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const label = f.get('label') as string; const unit = f.get('unit') as string; if (editingVitalDefinition) setVitalDefinitions(prev => prev.map(i => i.id === editingVitalDefinition.id ? { ...i, label, unit } : i)); else if (label && unit) setVitalDefinitions(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), label, unit }]); setShowVitalDefForm(false); setEditingVitalDefinition(null); }} className="p-5 space-y-4"><input required name="label" defaultValue={editingVitalDefinition?.label} placeholder="Metric Name" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" /><input required name="unit" defaultValue={editingVitalDefinition?.unit} placeholder="Unit (e.g. kg)" className="w-full p-4 rounded-xl border-2 border-slate-100 font-bold bg-slate-50 text-sm" /><button type="submit" className="w-full bg-rose-600 text-white py-4 rounded-xl font-black uppercase tracking-widest text-xs">Save</button></form></div></div>)}
       {showMedForm && (<div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[600] flex items-center justify-center p-0 sm:p-4"><div className="bg-white w-full h-full sm:h-auto sm:max-w-lg sm:rounded-[3rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom sm:zoom-in"><div className="p-6 md:p-8 bg-blue-600 text-white flex justify-between items-center shrink-0"><h2 className="text-xl font-black tracking-tight">{editingMedication ? 'Edit Med' : 'Register Med'}</h2><button onClick={() => { setShowMedForm(false); setEditingMedication(null); }} className="text-3xl">&times;</button></div><form onSubmit={(e) => { e.preventDefault(); const f = new FormData(e.currentTarget); const scientificName = f.get('scientificName') as string; const d = { brandName: f.get('brandName') as string, scientificName: scientificName, type: f.get('type') as string, unit: f.get('unit') as string, strength: f.get('strength') as string, category: f.get('category') as string, stock: parseInt(f.get('stock') as string) || 0, reorderLevel: parseInt(f.get('reorderLevel') as string) || 0, pricePerUnit: parseFloat(f.get('price') as string) || 0, companyName: f.get('companyName') as string }; if (editingMedication) setMedications(prev => prev.map(i => i.id === editingMedication.id ? { ...i, ...d } : i)); else setMedications(prev => [...prev, { id: Math.random().toString(36).substr(2, 9), ...d }]); setShowMedForm(false); setEditingMedication(null); }} className="p-6 md:p-8 space-y-5 flex-grow overflow-y-auto custom-scrollbar"><div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Brand</label><input required name="brandName" defaultValue={editingMedication?.brandName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Scientific</label><select name="scientificName" defaultValue={editingMedication?.scientificName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{scientificNames.map(n => <option key={n.id} value={n.label}>{n.label}</option>)}</select></div></div><div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Cat</label><select name="category" defaultValue={editingMedication?.category} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medCategories.map(cat => <option key={cat.id} value={cat.label}>{cat.label}</option>)}</select></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Packaging</label><input required name="unit" defaultValue={editingMedication?.unit} placeholder="e.g. Tab" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div><div className="grid grid-cols-2 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Strength</label><input required name="strength" defaultValue={editingMedication?.strength} placeholder="500mg" className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Type</label><select name="type" defaultValue={editingMedication?.type} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{medTypes.map(t => <option key={t.id} value={t.label}>{t.label}</option>)}</select></div></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Company</label><select name="companyName" defaultValue={editingMedication?.companyName} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs"><option value="">Select...</option>{companyNames.map(c => <option key={c.id} value={c.label}>{c.label}</option>)}</select></div><div className="grid grid-cols-3 gap-3"><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Price</label><input required type="number" name="price" defaultValue={editingMedication?.pricePerUnit} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Stock</label><input required type="number" name="stock" defaultValue={editingMedication?.stock} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div><div className="space-y-1"><label className="text-[10px] font-black text-slate-400 uppercase">Min</label><input required type="number" name="reorderLevel" defaultValue={editingMedication?.reorderLevel} className="w-full p-4 rounded-xl border-2 border-slate-100 bg-slate-50 font-black text-xs" /></div></div><button type="submit" className="w-full bg-blue-600 text-white py-4 md:py-5 rounded-2xl md:rounded-3xl font-black uppercase tracking-widest shadow-xl text-sm">Save Medicine</button></form></div></div>)}
 
