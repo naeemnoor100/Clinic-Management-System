@@ -247,7 +247,128 @@ const SidebarItem: React.FC<{ icon: React.ReactNode; label: string; active?: boo
   </button>
 );
 
+// --- Login Screen Component ---
+const LoginScreen = ({ onLogin, isLoading, error }: { onLogin: (u: string, p: string) => void, isLoading: boolean, error: string }) => {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onLogin(username, password);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans">
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-6">
+        <div className="text-center">
+            <div className="bg-indigo-600 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-200">
+                <Stethoscope className="w-8 h-8 text-white" />
+            </div>
+            <h1 className="text-2xl font-black text-slate-800">SmartClinic</h1>
+            <p className="text-slate-500">Sign in to access your clinic</p>
+        </div>
+        
+        {error && (
+            <div className="bg-rose-50 text-rose-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-rose-100">
+                <AlertCircle className="w-4 h-4" />
+                {error}
+            </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Username</label>
+                <input 
+                    type="text" 
+                    value={username} 
+                    onChange={e => setUsername(e.target.value)}
+                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    placeholder="Enter username"
+                    required
+                />
+            </div>
+            <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">Password</label>
+                <input 
+                    type="password" 
+                    value={password} 
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                    placeholder="Enter password"
+                    required
+                />
+            </div>
+            <button 
+                type="submit" 
+                disabled={isLoading}
+                className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-200 disabled:opacity-50 flex justify-center items-center gap-2"
+            >
+                {isLoading ? <RefreshCw className="w-5 h-5 animate-spin" /> : <ArrowRight className="w-5 h-5" />}
+                {isLoading ? 'Signing In...' : 'Sign In'}
+            </button>
+        </form>
+        <div className="text-center text-xs text-slate-400 mt-4">
+            Default Login: default_clinic / no_password
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const App: React.FC = () => {
+  // --- Auth State ---
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('smartclinic_auth_token'));
+  const [authToken, setAuthToken] = useState<string | null>(() => localStorage.getItem('smartclinic_auth_token'));
+  const [authError, setAuthError] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
+
+  // --- Auth Handlers ---
+  const handleLogin = async (u: string, p: string) => {
+    setIsLoggingIn(true);
+    setAuthError('');
+    try {
+        const res = await fetch(syncEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'login', username: u, password: p })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+            localStorage.setItem('smartclinic_auth_token', data.api_token);
+            localStorage.setItem('smartclinic_clinic_id', data.clinic_id);
+            setAuthToken(data.api_token);
+            setIsAuthenticated(true);
+            if (data.requires_password_change) {
+                setRequiresPasswordChange(true);
+                alert("Security Alert: You are using the default password. Please change it immediately in Settings > Sync.");
+                setView('settings');
+                setSettingsTab('sync');
+            }
+        } else {
+            setAuthError(data.message || 'Login failed');
+        }
+    } catch (e) {
+        setAuthError('Connection error. Please check your internet or server URL.');
+    } finally {
+        setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    if (confirm("Are you sure you want to log out?")) {
+        localStorage.removeItem('smartclinic_auth_token');
+        localStorage.removeItem('smartclinic_clinic_id');
+        setAuthToken(null);
+        setIsAuthenticated(false);
+        setView('dashboard');
+    }
+  };
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} isLoading={isLoggingIn} error={authError} />;
+  }
+
   const [view, setView] = useState<View>('dashboard');
   const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock' | 'appearance' | 'sync'>('appearance');
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
@@ -584,8 +705,12 @@ const App: React.FC = () => {
       try {
           const response = await fetch(`${syncEndpoint}?t=${Date.now()}`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'install' },
-              body: JSON.stringify({ action: 'install' })
+              headers: { 
+                  'Content-Type': 'application/json', 
+                  'X-Action-Type': 'install',
+                  'X-Api-Token': authToken || ''
+              },
+              body: JSON.stringify({ action: 'install', api_token: authToken })
           });
 
           if (!response.ok) throw new Error("Install request failed");
@@ -680,11 +805,16 @@ const App: React.FC = () => {
         // 2. Send Payload
         const response = await fetch(syncEndpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'backup' },
+            headers: { 
+                'Content-Type': 'application/json', 
+                'X-Action-Type': 'backup',
+                'X-Api-Token': authToken || ''
+            },
             body: JSON.stringify({
                 action: 'backup',
                 data: changes,
-                deletedIds: deletions
+                deletedIds: deletions,
+                api_token: authToken
             })
         });
 
@@ -731,8 +861,12 @@ const App: React.FC = () => {
         
         const response = await fetch(`${syncEndpoint}?t=${Date.now()}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'restore' },
-            body: JSON.stringify({ action: 'restore' })
+            headers: { 
+                'Content-Type': 'application/json', 
+                'X-Action-Type': 'restore',
+                'X-Api-Token': authToken || ''
+            },
+            body: JSON.stringify({ action: 'restore', api_token: authToken })
         });
 
         if (!response.ok) throw new Error("Fetch failed");
@@ -1207,8 +1341,8 @@ const App: React.FC = () => {
   }, [pharmacySales, billingDate, billingFilterStatus]);
 
   const billingStats = useMemo(() => {
-    const consultationIncome = filteredBillingConsultations.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
-    const pharmacyIncome = filteredBillingPharmacy.filter(s => s.paymentStatus === 'Paid').reduce((sum, s) => sum + s.totalAmount, 0);
+    const consultationIncome = filteredBillingConsultations.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (Number(v.feeAmount) || 0), 0);
+    const pharmacyIncome = filteredBillingPharmacy.filter(s => s.paymentStatus === 'Paid').reduce((sum, s) => sum + Number(s.totalAmount), 0);
     return { total: consultationIncome + pharmacyIncome, consultations: consultationIncome, pharmacy: pharmacyIncome };
   }, [filteredBillingConsultations, filteredBillingPharmacy]);
 
@@ -1336,10 +1470,10 @@ const App: React.FC = () => {
   }, [visits, patients, medications, visitSearchTerm]);
 
   const stats = useMemo(() => {
-    const consultationIncome = visits.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
-    const pharmacyIncome = pharmacySales.filter(s => s.date === getCurrentIsoDate() && s.paymentStatus === 'Paid').reduce((sum, s) => sum + s.totalAmount, 0);
+    const consultationIncome = visits.filter(v => v.paymentStatus === 'Paid').reduce((sum, v) => sum + (Number(v.feeAmount) || 0), 0);
+    const pharmacyIncome = pharmacySales.filter(s => s.paymentStatus === 'Paid').reduce((sum, s) => sum + Number(s.totalAmount), 0);
     const lowStockItems = medications.filter(m => m.stock <= m.reorderLevel);
-    return { totalPatients: patients.length, totalVisits: visits.length, collected: consultationIncome + pharmacyIncome, pending: visits.filter(v => v.paymentStatus === 'Pending').reduce((sum, v) => sum + (v.feeAmount || 0), 0), lowStockCount: lowStockItems.length, lowStockItems };
+    return { totalPatients: patients.length, totalVisits: visits.length, collected: consultationIncome + pharmacyIncome, pending: visits.filter(v => v.paymentStatus === 'Pending').reduce((sum, v) => sum + (Number(v.feeAmount) || 0), 0), lowStockCount: lowStockItems.length, lowStockItems };
   }, [patients, visits, pharmacySales, medications]);
 
   const selectedPatientInForm = useMemo(() => {
@@ -1474,8 +1608,8 @@ const App: React.FC = () => {
     const topPrescribed = Object.entries(medFrequency).sort((a, b) => (b[1] as number) - (a[1] as number)).slice(0, 5);
     const last7Days = Array.from({ length: 7 }, (_, i) => { const d = new Date(); d.setDate(d.getDate() - (6 - i)); return d.toISOString().split('T')[0]; });
     const revenueByDay = last7Days.map(date => {
-      const vTotal = visits.filter(v => v.date === date && v.paymentStatus === 'Paid').reduce((sum, v) => sum + (v.feeAmount || 0), 0);
-      const pTotal = pharmacySales.filter(s => s.date === date && s.paymentStatus === 'Paid').reduce((sum, s) => sum + s.totalAmount, 0);
+      const vTotal = visits.filter(v => v.date === date && v.paymentStatus === 'Paid').reduce((sum, v) => sum + (Number(v.feeAmount) || 0), 0);
+      const pTotal = pharmacySales.filter(s => s.date === date && s.paymentStatus === 'Paid').reduce((sum, s) => sum + Number(s.totalAmount), 0);
       return { date, total: vTotal + pTotal };
     });
     const ages: Record<string, number> = { 'Children (0-17)': 0, 'Adults (18-54)': 0, 'Seniors (55+)': 0 };
@@ -1526,7 +1660,13 @@ const App: React.FC = () => {
 
       <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
         <div className="flex items-center justify-between px-2"><div className="flex items-center gap-4"><div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div><div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div></div><div className="relative flex items-center gap-2"><button onClick={() => setShowNotifications(!showNotifications)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative"><Bell size={22} className={stats.lowStockCount > 0 ? "animate-[pulse_2s_infinite]" : ""} />{stats.lowStockCount > 0 && (<span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-50"></span>)}</button>{showNotifications && (<div className="absolute left-full ml-4 top-0 w-72 bg-white border border-slate-200 shadow-2xl rounded-3xl z-[500] p-6 animate-in slide-in-from-left-4 overflow-hidden"><div className="flex items-center justify-between mb-4"><h4 className="text-xs font-black uppercase text-slate-400 tracking-widest">Inventory Alerts</h4><button onClick={() => setShowNotifications(false)} className="text-slate-300 hover:text-slate-500"><X size={16}/></button></div><div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1">{stats.lowStockCount > 0 ? stats.lowStockItems.map(m => (<div key={m.id} className="p-3 bg-rose-50 border border-rose-100 rounded-xl"><div className="flex justify-between items-start gap-2"><p className="text-[11px] font-black text-rose-800 leading-tight">{m.brandName}</p><span className="text-[9px] font-bold text-rose-500 whitespace-nowrap">Stock: {m.stock}</span></div><p className="text-[9px] font-bold text-rose-400 uppercase mt-1">Reorder Level: {m.reorderLevel}</p></div>)) : (<div className="py-10 text-center text-slate-300"><CheckCircle2 size={32} className="mx-auto mb-2 opacity-20" /><p className="text-[10px] font-black uppercase">All stock levels normal</p></div>)}</div>{stats.lowStockCount > 0 && (<button onClick={() => { setView('settings'); setSettingsTab('low_stock'); setShowNotifications(false); }} className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">Manage Procurement</button>)}</div>)}</div></div>
-        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} /><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} /></nav>
+        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} /><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} />
+<div className="mt-auto pt-4 border-t border-slate-100">
+    <button onClick={handleLogout} className="w-full flex items-center gap-3 p-3 rounded-2xl transition-all text-slate-400 hover:bg-rose-50 hover:text-rose-600 group">
+        <div className="p-2 bg-white rounded-xl shadow-sm group-hover:shadow-rose-100 transition-all"><ArrowLeft size={20} /></div>
+        <span className="font-bold text-sm">Logout</span>
+    </button>
+</div></nav>
         <div className="mt-auto pt-6 border-t border-slate-200">
             <div onClick={() => handleCloudSync('backup')} className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-3 relative overflow-hidden group cursor-pointer hover:border-blue-200 transition-all active:scale-95">
                 <div className={`relative flex items-center justify-center w-10 h-10 rounded-2xl transition-all ${isSyncing || pendingSync ? 'bg-blue-50 text-blue-600' : syncStatus === 'error' ? 'bg-rose-50 text-rose-600' : syncStatus === 'preview_mode' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
@@ -1637,6 +1777,43 @@ const App: React.FC = () => {
                                 <h2 className="text-2xl font-black text-slate-800">Cloud Synchronization</h2>
                                 <p className="text-slate-400 text-sm font-medium">Manage your data sync status and troubleshoot connection issues.</p>
                             </div>
+                        </div>
+
+                        {/* Change Password Section */}
+                        <div className={`p-6 rounded-2xl border space-y-4 ${requiresPasswordChange ? 'bg-rose-50 border-rose-200 ring-2 ring-rose-500 ring-offset-2' : 'bg-amber-50 border-amber-100'}`}>
+                            <div className="flex justify-between items-center">
+                                <h3 className={`font-black ${requiresPasswordChange ? 'text-rose-900' : 'text-amber-900'}`}>
+                                    {requiresPasswordChange ? '⚠️ Action Required: Change Password' : 'Change Password'}
+                                </h3>
+                                <span className={`text-[10px] font-bold bg-white px-2 py-1 rounded uppercase ${requiresPasswordChange ? 'text-rose-500' : 'text-amber-500'}`}>Security</span>
+                            </div>
+                            <p className={`text-sm ${requiresPasswordChange ? 'text-rose-700 font-bold' : 'text-amber-700'}`}>
+                                {requiresPasswordChange ? 'You are using the default password. Please set a secure password immediately.' : 'Update your clinic login password.'}
+                            </p>
+                            <form onSubmit={async (e) => {
+                                e.preventDefault();
+                                const f = new FormData(e.currentTarget);
+                                const newPass = f.get('newPass') as string;
+                                if (newPass.length < 6) { alert("Password must be at least 6 characters"); return; }
+                                try {
+                                    const res = await fetch(syncEndpoint, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'X-Action-Type': 'change_password', 'X-Api-Token': authToken || '' },
+                                        body: JSON.stringify({ action: 'change_password', new_password: newPass, api_token: authToken })
+                                    });
+                                    const data = await res.json();
+                                    if (data.status === 'success') {
+                                        alert("Password changed successfully.");
+                                        setRequiresPasswordChange(false);
+                                        (e.target as HTMLFormElement).reset();
+                                    } else {
+                                        alert("Error: " + data.message);
+                                    }
+                                } catch (err) { alert("Connection error"); }
+                            }} className="flex gap-2">
+                                <input name="newPass" type="password" placeholder="New Password" className="flex-1 p-2 rounded border border-amber-200 text-sm" required minLength={6} />
+                                <button type="submit" className="px-4 py-2 bg-amber-500 text-white rounded font-bold text-xs uppercase hover:bg-amber-600 shadow-sm">Update</button>
+                            </form>
                         </div>
 
                         {/* Database Setup Section */}

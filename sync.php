@@ -53,10 +53,99 @@ if (isset($headers['x-action-type'])) {
     $actionType = $decoded['action'];
 }
 
-// Default to Clinic ID 1 (Single Tenant Mode)
-$clinicId = 1;
+// --- Authentication Logic ---
 
-// Helper function to insert/update
+if ($actionType === 'login') {
+    $username = $decoded['username'] ?? '';
+    $password = $decoded['password'] ?? '';
+
+    // Default clinic check (if not exists, create it for first run)
+    $stmt = $pdo->query("SELECT COUNT(*) FROM clinics");
+    if ($stmt->fetchColumn() == 0) {
+        $pdo->exec("INSERT INTO clinics (username, password_hash) VALUES ('default_clinic', 'no_password')");
+    }
+
+    $stmt = $pdo->prepare("SELECT * FROM clinics WHERE username = ?");
+    $stmt->execute([$username]);
+    $clinic = $stmt->fetch();
+
+    // Allow login if password matches OR if it's the default 'no_password' setup
+    if ($clinic && ($clinic['password_hash'] === 'no_password' || password_verify($password, $clinic['password_hash']))) {
+        // Generate new API Token
+        $token = bin2hex(random_bytes(32));
+        $pdo->prepare("UPDATE clinics SET api_token = ? WHERE id = ?")->execute([$token, $clinic['id']]);
+        
+        echo json_encode([
+            "status" => "success", 
+            "clinic_id" => $clinic['id'], 
+            "api_token" => $token,
+            "requires_password_change" => ($clinic['password_hash'] === 'no_password')
+        ]);
+    } else {
+        http_response_code(401);
+        echo json_encode(["status" => "error", "message" => "Invalid credentials"]);
+    }
+    exit;
+}
+
+// For all other actions (except install), verify API Token if provided
+// We allow 'install' without token for initial setup.
+// For backward compatibility or transition, we might allow requests without token if strictly not enforced yet, 
+// but user asked for "secure access", so we should enforce it for data operations.
+
+$authenticatedClinicId = null;
+if ($actionType !== 'install' && $actionType !== 'login') {
+    $token = $headers['x-api-token'] ?? ($decoded['api_token'] ?? null);
+    
+    if ($token) {
+        $stmt = $pdo->prepare("SELECT id FROM clinics WHERE api_token = ?");
+        $stmt->execute([$token]);
+        $authenticatedClinicId = $stmt->fetchColumn();
+    }
+
+    // If no token provided, we fall back to the requested clinicId (INSECURE MODE for backward compat if needed, 
+    // but let's enforce it if the user wants security). 
+    // However, to avoid breaking the app before the frontend is updated, 
+    // we might need to be lenient OR just update frontend immediately.
+    // Let's enforce it but allow 'default_clinic' with 'no_password' to bypass? No, that's bad.
+    // Let's assume the frontend will send the token.
+    
+    if (!$authenticatedClinicId && $actionType !== 'install') {
+        // Check if we are in "setup mode" (default clinic has no password)
+        // If so, maybe allow access? No, force login.
+        // We will return 401.
+        // BUT: The frontend 'install' might be called before login.
+        // 'install' is exempted above.
+        
+        // Allow 'poll' without token? No, that leaks data updates.
+        
+        http_response_code(401);
+        echo json_encode(["status" => "error", "message" => "Unauthorized: Missing or Invalid API Token"]);
+        exit;
+    }
+    
+    // Use the authenticated ID
+    $clinicId = $authenticatedClinicId;
+} else {
+    // For install/login, use default or input
+    $clinicId = $decoded['clinicId'] ?? 1;
+}
+
+if ($actionType === 'change_password') {
+    $newPassword = $decoded['new_password'] ?? '';
+    if (strlen($newPassword) < 6) {
+        echo json_encode(["status" => "error", "message" => "Password must be at least 6 characters"]);
+        exit;
+    }
+    
+    $hash = password_hash($newPassword, PASSWORD_DEFAULT);
+    $pdo->prepare("UPDATE clinics SET password_hash = ? WHERE id = ?")->execute([$hash, $clinicId]);
+    
+    echo json_encode(["status" => "success"]);
+    exit;
+}
+
+// ... existing helper functions ...
 function camelToSnake($input) {
     return strtolower(preg_replace('/(?<!^)[A-Z]/', '_$0', $input));
 }
@@ -342,12 +431,20 @@ if ($actionType === 'backup') {
         } catch (Exception $e) {
             // Ignore if not allowed
         }
+        
+        // Ensure api_token column exists (Migration)
+        try {
+            $pdo->exec("ALTER TABLE `clinics` ADD COLUMN `api_token` VARCHAR(64)");
+        } catch (Exception $e) {
+            // Ignore if column exists
+        }
 
         $tables = [
             "clinics" => "CREATE TABLE IF NOT EXISTS `clinics` (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 username VARCHAR(50),
                 password_hash VARCHAR(255),
+                api_token VARCHAR(64),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
             
