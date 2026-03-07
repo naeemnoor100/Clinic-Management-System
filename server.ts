@@ -1,6 +1,5 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
-import bodyParser from 'body-parser';
 import cors from 'cors';
 
 const app = express();
@@ -24,9 +23,14 @@ const mockDb: any = {
 };
 
 app.use(cors());
-app.use(bodyParser.json({ limit: '50mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // --- Mock Sync Endpoint for Preview ---
+app.get('/sync.php', (req, res) => {
+    res.json({ status: 'ok', message: 'Sync endpoint is reachable' });
+});
+
 app.post('/sync.php', async (req, res) => {
     const action = req.body.action || req.headers['x-action-type'];
     const clinicId = 1; // Single tenant mock

@@ -333,7 +333,16 @@ const App: React.FC = () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'login', username: u, password: p })
         });
-        const data = await res.json();
+        
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (err) {
+            console.error("Non-JSON response:", text);
+            throw new Error("Server Error: " + text.substring(0, 100));
+        }
+
         if (data.status === 'success') {
             localStorage.setItem('smartclinic_auth_token', data.api_token);
             localStorage.setItem('smartclinic_clinic_id', data.clinic_id);
@@ -348,8 +357,9 @@ const App: React.FC = () => {
         } else {
             setAuthError(data.message || 'Login failed');
         }
-    } catch (e) {
-        setAuthError('Connection error. Please check your internet or server URL.');
+    } catch (e: any) {
+        console.error("Login error:", e);
+        setAuthError('Connection error: ' + (e.message || e.toString()));
     } finally {
         setIsLoggingIn(false);
     }
