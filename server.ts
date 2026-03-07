@@ -34,6 +34,42 @@ app.post('/sync.php', async (req, res) => {
     // Helper for deep comparison
     const isDeepEqual = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
 
+    // --- Mock Authentication Logic ---
+    if (action === 'login') {
+        const { username, password } = req.body;
+        
+        // Initialize Mock Clinic Credentials if not set
+        if (!mockDb.clinic) {
+            mockDb.clinic = { username: 'default_clinic', password: 'no_password', api_token: null };
+        }
+
+        if (username === mockDb.clinic.username && (mockDb.clinic.password === 'no_password' || password === mockDb.clinic.password)) {
+            const token = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+            mockDb.clinic.api_token = token;
+            
+            return res.json({
+                status: "success", 
+                clinic_id: 1, 
+                api_token: token,
+                requires_password_change: (mockDb.clinic.password === 'no_password')
+            });
+        } else {
+            return res.status(401).json({ status: "error", message: "Invalid credentials" });
+        }
+    }
+
+    if (action === 'change_password') {
+        const { new_password, api_token } = req.body;
+        if (!mockDb.clinic || mockDb.clinic.api_token !== api_token) {
+            return res.status(401).json({ status: "error", message: "Unauthorized" });
+        }
+        if (new_password.length < 6) {
+            return res.json({ status: "error", message: "Password must be at least 6 characters" });
+        }
+        mockDb.clinic.password = new_password;
+        return res.json({ status: "success" });
+    }
+
     if (action === 'poll') {
         // Long Polling Logic
         const clientTimestamp = req.body.timestamp ? new Date(req.body.timestamp).getTime() : 0;
