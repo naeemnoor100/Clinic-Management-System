@@ -322,6 +322,9 @@ const App: React.FC = () => {
   const [authError, setAuthError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
+  
+  // --- Real-time Sync States (Moved up for Auth) ---
+  const [syncEndpoint, setSyncEndpoint] = useState<string>(DEFAULT_SYNC_URL);
 
   // --- Auth Handlers ---
   const handleLogin = async (u: string, p: string) => {
@@ -375,10 +378,6 @@ const App: React.FC = () => {
     }
   };
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} isLoading={isLoggingIn} error={authError} />;
-  }
-
   const [view, setView] = useState<View>('dashboard');
   const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock' | 'appearance' | 'sync'>('appearance');
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
@@ -392,7 +391,7 @@ const App: React.FC = () => {
 
   // --- Real-time Sync States ---
   // const [isAutoSyncEnabled, setIsAutoSyncEnabled] = useState<boolean>(() => getFromLocal('auto_sync_enabled', false)); // Deprecated: Always enabled
-  const [syncEndpoint, setSyncEndpoint] = useState<string>(DEFAULT_SYNC_URL);
+  // const [syncEndpoint, setSyncEndpoint] = useState<string>(DEFAULT_SYNC_URL); // Moved up
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'success' | 'error' | 'preview_mode'>('idle');
   const [syncStatusMessage, setSyncStatusMessage] = useState<string>('');
@@ -601,15 +600,16 @@ const App: React.FC = () => {
   // Initial Data Fetch
   useEffect(() => {
     const initApp = async () => {
+      if (!isAuthenticated) return;
       await handleCloudSync('restore', true);
       setIsInitialized(true);
     };
     initApp();
-  }, []); // Run once on mount
+  }, [isAuthenticated]); // Run when authenticated
 
   // Long Polling for Real-Time Updates
   useEffect(() => {
-    if (!isInitialized) return;
+    if (!isInitialized || !isAuthenticated) return;
 
     let isMounted = true;
     let pollController = new AbortController();
@@ -1655,6 +1655,10 @@ const App: React.FC = () => {
   const getBrandsForCompany = (companyLabel: string) => medications.filter(m => m.companyName.toLowerCase() === companyLabel.toLowerCase()).map(m => m.brandName);
   const getBrandsForCategory = (categoryLabel: string) => medications.filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase()).map(m => m.brandName);
   const getBrandsForType = (typeLabel: string) => medications.filter(m => m.type.toLowerCase() === typeLabel.toLowerCase()).map(m => m.brandName);
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} isLoading={isLoggingIn} error={authError} />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">

@@ -148,7 +148,11 @@ app.post('/sync.php', async (req, res) => {
         return res.json({ status: 'success', data: mockDb });
     }
 
-    return res.status(400).json({ status: 'error', message: 'Invalid action' });
+    if (action === 'install') {
+        return res.json({ status: 'success', message: 'Mock Database initialized successfully.' });
+    }
+
+    return res.status(400).json({ status: 'error', message: 'Invalid action type.' });
 });
 
 
