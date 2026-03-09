@@ -20,6 +20,7 @@ const mockDb: any = {
     vitalDefinitions: [],
     prescriptionTemplates: [],
     patientCounter: 0,
+    users: [],
     lastUpdated: Date.now()
 };
 
@@ -109,6 +110,25 @@ app.post('/sync.php', async (req, res) => {
     }
 
     return res.status(400).json({ status: 'error', message: 'Invalid action' });
+});
+
+app.post('/api/signup', (req, res) => {
+    const { username, password } = req.body;
+    if (mockDb.users.find((u: any) => u.username === username)) {
+        return res.status(400).json({ status: 'error', message: 'Username already exists' });
+    }
+    const newUser = { id: Date.now(), username, password };
+    mockDb.users.push(newUser);
+    return res.json({ status: 'success', user: { id: newUser.id, username: newUser.username } });
+});
+
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    const user = mockDb.users.find((u: any) => u.username === username && u.password === password);
+    if (!user) {
+        return res.status(401).json({ status: 'error', message: 'Invalid username or password' });
+    }
+    return res.json({ status: 'success', user: { id: user.id, username: user.username } });
 });
 
 
