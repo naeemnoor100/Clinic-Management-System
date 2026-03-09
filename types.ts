@@ -127,4 +127,4 @@ export interface QueueItem {
   checkInTime: string;
 }
 
-export type View = 'dashboard' | 'patients' | 'visits' | 'patient-detail' | 'settings' | 'queue' | 'billing' | 'pharmacy' | 'analytics' | 'user-management';
+export type View = 'dashboard' | 'patients' | 'visits' | 'patient-detail' | 'settings' | 'queue' | 'billing' | 'pharmacy' | 'analytics';

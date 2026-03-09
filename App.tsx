@@ -84,13 +84,11 @@ import {
   Globe2,
   HelpCircle,
   SmartphoneNfc,
-  Download,
-  LogOut
+  Download
 } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { Patient, Visit, Medication, View, PrescribedMed, Symptom, VitalDefinition, PharmacySale, PharmacySaleItem, ScientificName, CompanyName, MedType, MedCategory, PrescriptionTemplate } from './types';
 import { getPatientHistorySummary } from './services/gemini';
-import Login from './src/components/Login';
 
 // --- Utility: Persistence ---
 const saveToLocal = (key: string, data: any) => localStorage.setItem(`smartclinic_${key}`, JSON.stringify(data));
@@ -251,7 +249,6 @@ const SidebarItem: React.FC<{ icon: React.ReactNode; label: string; active?: boo
 
 const App: React.FC = () => {
   const [view, setView] = useState<View>('dashboard');
-  const [user, setUser] = useState<any>(null);
   const [settingsTab, setSettingsTab] = useState<'vitals' | 'symptoms' | 'scientific' | 'companies' | 'med_categories' | 'med_types' | 'meds' | 'templates' | 'low_stock' | 'appearance' | 'sync'>('appearance');
   const [detailTab, setDetailTab] = useState<'history' | 'prescriptions'>('history');
   const [prescSort, setPrescSort] = useState<{ key: 'date' | 'name', direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
@@ -320,29 +317,9 @@ const App: React.FC = () => {
     return Math.max(...numericCodes, 0);
   });
 
-  const fetchUsers = async () => {
-    const response = await fetch('api.php?action=getUsers');
-    const data = await response.json();
-    if (data.status === 'success') {
-      setUsers(data.users);
-    }
-  };
-
   useEffect(() => {
-    if (user?.role === 'admin') {
-      fetchUsers();
-    }
-  }, [user]);
-
-  const updateUserRole = async (userId: string, role: string) => {
-    await fetch('api.php?action=updateUserRole', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId, role }),
-    });
-    fetchUsers();
-  };
-
+    localStorage.setItem('smartclinic_patient_counter', patientCounter.toString());
+  }, [patientCounter]);
 
   // Apply Font Size
   useEffect(() => {
@@ -351,7 +328,6 @@ const App: React.FC = () => {
   }, [fontSize]);
 
   const [cart, setCart] = useState<{ medicationId: string, quantity: number }[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
   const [walkinName, setWalkinName] = useState('Walk-in Customer');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -1536,10 +1512,6 @@ const App: React.FC = () => {
   const getBrandsForCategory = (categoryLabel: string) => medications.filter(m => m.category.toLowerCase() === categoryLabel.toLowerCase()).map(m => m.brandName);
   const getBrandsForType = (typeLabel: string) => medications.filter(m => m.type.toLowerCase() === typeLabel.toLowerCase()).map(m => m.brandName);
 
-  if (!user) {
-    return <Login onLogin={setUser} />;
-  }
-
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-50 font-sans text-slate-900 overflow-x-hidden relative">
       <header className="md:hidden sticky top-0 bg-white border-b border-slate-200 z-50 flex items-center justify-between px-4 py-3 shrink-0 print:hidden">
@@ -1554,7 +1526,7 @@ const App: React.FC = () => {
 
       <aside className="w-80 bg-slate-50 border-r border-slate-200 p-8 flex flex-col gap-10 sticky top-0 h-screen hidden md:flex print:hidden shrink-0">
         <div className="flex items-center justify-between px-2"><div className="flex items-center gap-4"><div className="bg-blue-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-100"><Stethoscope size={32} /></div><div className="flex flex-col"><span className="text-2xl font-black text-slate-800 tracking-tighter">SmartClinic</span><span className="text-[10px] font-black text-blue-600 uppercase tracking-widest text-center">MEDICAL HUB</span></div></div><div className="relative flex items-center gap-2"><button onClick={() => setShowNotifications(!showNotifications)} className="p-2 text-slate-400 hover:text-blue-600 transition-colors relative"><Bell size={22} className={stats.lowStockCount > 0 ? "animate-[pulse_2s_infinite]" : ""} />{stats.lowStockCount > 0 && (<span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-slate-50"></span>)}</button>{showNotifications && (<div className="absolute left-full ml-4 top-0 w-72 bg-white border border-slate-200 shadow-2xl rounded-3xl z-[500] p-6 animate-in slide-in-from-left-4 overflow-hidden"><div className="flex items-center justify-between mb-4"><h4 className="text-xs font-black uppercase text-slate-400 tracking-widest">Inventory Alerts</h4><button onClick={() => setShowNotifications(false)} className="text-slate-300 hover:text-slate-500"><X size={16}/></button></div><div className="space-y-3 max-h-80 overflow-y-auto custom-scrollbar pr-1">{stats.lowStockCount > 0 ? stats.lowStockItems.map(m => (<div key={m.id} className="p-3 bg-rose-50 border border-rose-100 rounded-xl"><div className="flex justify-between items-start gap-2"><p className="text-[11px] font-black text-rose-800 leading-tight">{m.brandName}</p><span className="text-[9px] font-bold text-rose-500 whitespace-nowrap">Stock: {m.stock}</span></div><p className="text-[9px] font-bold text-rose-400 uppercase mt-1">Reorder Level: {m.reorderLevel}</p></div>)) : (<div className="py-10 text-center text-slate-300"><CheckCircle2 size={32} className="mx-auto mb-2 opacity-20" /><p className="text-[10px] font-black uppercase">All stock levels normal</p></div>)}</div>{stats.lowStockCount > 0 && (<button onClick={() => { setView('settings'); setSettingsTab('low_stock'); setShowNotifications(false); }} className="w-full mt-4 py-2 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-blue-700 transition-all">Manage Procurement</button>)}</div>)}</div></div>
-        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} />{user?.role === 'admin' && (<><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Users size={24} />} label="User Management" active={view === 'user-management'} onClick={() => setView('user-management')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} /></>)}</nav>
+        <nav className="flex flex-col gap-3 flex-grow overflow-y-auto custom-scrollbar pr-2"><SidebarItem icon={<LayoutDashboard size={24} />} label="Dashboard" active={view === 'dashboard'} onClick={() => setView('dashboard')} /><SidebarItem icon={<Users size={24} />} label="Patients" active={view === 'patients' || view === 'patient-detail'} onClick={() => setView('patients')} /><SidebarItem icon={<ClipboardList size={24} />} label="Clinical Logs" active={view === 'visits'} onClick={() => setView('visits')} /><SidebarItem icon={<Pill size={24} />} label="Pharmacy" active={view === 'pharmacy'} onClick={() => setView('pharmacy')} /><SidebarItem icon={<Receipt size={24} />} label="Billing" active={view === 'billing'} onClick={() => setView('billing')} /><SidebarItem icon={<BarChart3 size={24} />} label="Analytics" active={view === 'analytics'} onClick={() => setView('analytics')} /><SidebarItem icon={<Settings size={24} />} label="Settings" active={view === 'settings'} onClick={() => setView('settings')} /></nav>
         <div className="mt-auto pt-6 border-t border-slate-200">
             <div onClick={() => handleCloudSync('backup')} className="bg-white p-4 rounded-[1.5rem] border border-slate-100 shadow-sm flex items-center gap-3 relative overflow-hidden group cursor-pointer hover:border-blue-200 transition-all active:scale-95">
                 <div className={`relative flex items-center justify-center w-10 h-10 rounded-2xl transition-all ${isSyncing || pendingSync ? 'bg-blue-50 text-blue-600' : syncStatus === 'error' ? 'bg-rose-50 text-rose-600' : syncStatus === 'preview_mode' ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'}`}>
@@ -1589,45 +1561,10 @@ const App: React.FC = () => {
                 </div>
             </div>
         </div>
-        <button onClick={() => setUser(null)} className="flex items-center justify-center gap-2 text-slate-400 hover:text-rose-600 font-black uppercase text-[10px] tracking-widest mt-4">
-          <LogOut size={14} /> Log Out
-        </button>
       </aside>
 
       <main className="flex-grow p-4 md:p-12 overflow-auto print:hidden pb-24 md:pb-12">
         <div className="max-w-6xl mx-auto w-full">
-           {view === 'user-management' && user?.role === 'admin' && (
-             <div className="p-8 bg-white rounded-3xl shadow-sm border border-slate-100">
-               <h2 className="text-2xl font-black text-slate-800 mb-6">User Management</h2>
-               <table className="w-full text-left">
-                 <thead>
-                   <tr className="border-b border-slate-200">
-                     <th className="pb-4 text-xs font-black uppercase text-slate-400">Username</th>
-                     <th className="pb-4 text-xs font-black uppercase text-slate-400">Role</th>
-                     <th className="pb-4 text-xs font-black uppercase text-slate-400">Action</th>
-                   </tr>
-                 </thead>
-                 <tbody>
-                   {users.map(u => (
-                     <tr key={u.id} className="border-b border-slate-100">
-                       <td className="py-4 text-sm font-bold text-slate-700">{u.username}</td>
-                       <td className="py-4 text-sm font-bold text-slate-700">{u.role}</td>
-                       <td className="py-4">
-                         <select 
-                           value={u.role} 
-                           onChange={(e) => updateUserRole(u.id, e.target.value)}
-                           className="p-2 border rounded-xl text-xs font-black uppercase"
-                         >
-                           <option value="user">User</option>
-                           <option value="admin">Admin</option>
-                         </select>
-                       </td>
-                     </tr>
-                   ))}
-                 </tbody>
-               </table>
-             </div>
-           )}
            {view === 'dashboard' && (
               <div className="space-y-6 md:space-y-10 animate-in fade-in">
                 <div className="flex justify-between items-center"><h1 className="text-2xl md:text-3xl font-black text-slate-800">Dashboard</h1>{isSyncing && <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full animate-pulse border border-blue-100"><RefreshCw size={12} className="animate-spin"/><span className="text-[10px] font-black uppercase tracking-widest">Real-time Syncing...</span></div>}</div>
