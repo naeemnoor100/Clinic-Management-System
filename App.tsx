@@ -324,7 +324,7 @@ const App: React.FC = () => {
   const [requiresPasswordChange, setRequiresPasswordChange] = useState(false);
   
   // --- Real-time Sync States (Moved up for Auth) ---
-  const [syncEndpoint, setSyncEndpoint] = useState<string>(DEFAULT_SYNC_URL);
+  const [syncEndpoint, setSyncEndpoint] = useState<string>(() => getFromLocal('sync_endpoint', DEFAULT_SYNC_URL));
 
   // --- Auth Handlers ---
   const handleLogin = async (u: string, p: string) => {
@@ -734,8 +734,8 @@ const App: React.FC = () => {
           const result = JSON.parse(text);
           if (result.status === 'success') {
               alert(result.message);
-              // Optionally trigger a sync after install
-              handleCloudSync('restore');
+              // Trigger a backup to populate the new database with local data
+              handleCloudSync('backup');
           } else {
               alert("Error: " + result.message);
           }
@@ -883,6 +883,7 @@ const App: React.FC = () => {
         
         const text = await response.text();
         if (text.trim().startsWith('<?php') || text.includes('<?php')) {
+             if (!isBackground) alert("Server returned raw PHP. The mock server might not be running correctly, or you are pointing to a real PHP server without PHP installed.");
              setIsSyncing(false);
              return;
         }
@@ -893,6 +894,19 @@ const App: React.FC = () => {
         const serverData = result.data;
         const oldBase = baseStateRef.current;
         
+        // If server is completely empty and we have local data, push our local data to the server.
+        // This handles the case where the mock server restarts and loses its in-memory data.
+        const isServerEmpty = !serverData.patients?.length && !serverData.medications?.length && !serverData.visits?.length;
+        if (isServerEmpty && (patients.length > 0 || medications.length > 0 || visits.length > 0)) {
+            // Clear base state so everything is treated as a new addition
+            baseStateRef.current = {};
+            localStorage.setItem('smartclinic_basestate', JSON.stringify({}));
+            
+            setIsSyncing(false);
+            handleCloudSync('backup', isBackground);
+            return;
+        }
+
         // Smart Merge: Server > Base, but Local > Server (if modified locally)
         const smartMerge = (key: string, currentLocal: any[], serverItems: any[]) => {
             // FRESH SYNC CHECK: If we have no base state, trust server 100%

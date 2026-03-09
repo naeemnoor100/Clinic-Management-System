@@ -32,7 +32,8 @@ app.get('/sync.php', (req, res) => {
 });
 
 app.post('/sync.php', async (req, res) => {
-    const action = req.body.action || req.headers['x-action-type'];
+    const body = req.body || {};
+    const action = body.action || req.headers['x-action-type'];
     const clinicId = 1; // Single tenant mock
 
     // Helper for deep comparison
@@ -40,7 +41,7 @@ app.post('/sync.php', async (req, res) => {
 
     // --- Mock Authentication Logic ---
     if (action === 'login') {
-        const { username, password } = req.body;
+        const { username, password } = body;
         
         // Initialize Mock Clinic Credentials if not set
         if (!mockDb.clinic) {
@@ -63,7 +64,7 @@ app.post('/sync.php', async (req, res) => {
     }
 
     if (action === 'change_password') {
-        const { new_password, api_token } = req.body;
+        const { new_password, api_token } = body;
         if (!mockDb.clinic || mockDb.clinic.api_token !== api_token) {
             return res.status(401).json({ status: "error", message: "Unauthorized" });
         }
@@ -76,22 +77,31 @@ app.post('/sync.php', async (req, res) => {
 
     if (action === 'poll') {
         // Long Polling Logic
-        const clientTimestamp = req.body.timestamp ? new Date(req.body.timestamp).getTime() : 0;
+        const clientTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : 0;
         const startTime = Date.now();
+        let isDisconnected = false;
+
+        req.on('close', () => {
+            isDisconnected = true;
+        });
         
         // Loop for up to 25 seconds
         while (Date.now() - startTime < 25000) {
+            if (isDisconnected) return;
             if (mockDb.lastUpdated > clientTimestamp) {
                 return res.json({ status: 'update_available', timestamp: new Date(mockDb.lastUpdated).toISOString() });
             }
             await new Promise(resolve => setTimeout(resolve, 500)); // Sleep 0.5s
         }
-        return res.json({ status: 'no_change' });
+        if (!isDisconnected) {
+            return res.json({ status: 'no_change' });
+        }
+        return;
     }
 
     if (action === 'backup') {
-        const data = req.body.data;
-        const deletedIds = req.body.deletedIds || [];
+        const data = body.data;
+        const deletedIds = body.deletedIds || [];
 
         // 1. Handle Deletions
         if (deletedIds.length > 0) {
