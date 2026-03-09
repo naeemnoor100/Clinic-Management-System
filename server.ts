@@ -1,5 +1,6 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
+import bodyParser from 'body-parser';
 import cors from 'cors';
 
 const app = express();
@@ -23,85 +24,34 @@ const mockDb: any = {
 };
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(bodyParser.json({ limit: '50mb' }));
 
 // --- Mock Sync Endpoint for Preview ---
-app.get('/sync.php', (req, res) => {
-    res.json({ status: 'ok', message: 'Sync endpoint is reachable' });
-});
-
 app.post('/sync.php', async (req, res) => {
-    const body = req.body || {};
-    const action = body.action || req.headers['x-action-type'];
+    const action = req.body.action || req.headers['x-action-type'];
     const clinicId = 1; // Single tenant mock
 
     // Helper for deep comparison
     const isDeepEqual = (a: any, b: any) => JSON.stringify(a) === JSON.stringify(b);
 
-    // --- Mock Authentication Logic ---
-    if (action === 'login') {
-        const { username, password } = body;
-        
-        // Initialize Mock Clinic Credentials if not set
-        if (!mockDb.clinic) {
-            mockDb.clinic = { username: 'default_clinic', password: 'no_password', api_token: null };
-        }
-
-        if (username === mockDb.clinic.username && (mockDb.clinic.password === 'no_password' || password === mockDb.clinic.password)) {
-            const token = Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-            mockDb.clinic.api_token = token;
-            
-            return res.json({
-                status: "success", 
-                clinic_id: 1, 
-                api_token: token,
-                requires_password_change: (mockDb.clinic.password === 'no_password')
-            });
-        } else {
-            return res.status(401).json({ status: "error", message: "Invalid credentials" });
-        }
-    }
-
-    if (action === 'change_password') {
-        const { new_password, api_token } = body;
-        if (!mockDb.clinic || mockDb.clinic.api_token !== api_token) {
-            return res.status(401).json({ status: "error", message: "Unauthorized" });
-        }
-        if (new_password.length < 6) {
-            return res.json({ status: "error", message: "Password must be at least 6 characters" });
-        }
-        mockDb.clinic.password = new_password;
-        return res.json({ status: "success" });
-    }
-
     if (action === 'poll') {
         // Long Polling Logic
-        const clientTimestamp = body.timestamp ? new Date(body.timestamp).getTime() : 0;
+        const clientTimestamp = req.body.timestamp ? new Date(req.body.timestamp).getTime() : 0;
         const startTime = Date.now();
-        let isDisconnected = false;
-
-        req.on('close', () => {
-            isDisconnected = true;
-        });
         
         // Loop for up to 25 seconds
         while (Date.now() - startTime < 25000) {
-            if (isDisconnected) return;
             if (mockDb.lastUpdated > clientTimestamp) {
                 return res.json({ status: 'update_available', timestamp: new Date(mockDb.lastUpdated).toISOString() });
             }
             await new Promise(resolve => setTimeout(resolve, 500)); // Sleep 0.5s
         }
-        if (!isDisconnected) {
-            return res.json({ status: 'no_change' });
-        }
-        return;
+        return res.json({ status: 'no_change' });
     }
 
     if (action === 'backup') {
-        const data = body.data;
-        const deletedIds = body.deletedIds || [];
+        const data = req.body.data;
+        const deletedIds = req.body.deletedIds || [];
 
         // 1. Handle Deletions
         if (deletedIds.length > 0) {
@@ -158,11 +108,7 @@ app.post('/sync.php', async (req, res) => {
         return res.json({ status: 'success', data: mockDb });
     }
 
-    if (action === 'install') {
-        return res.json({ status: 'success', message: 'Mock Database initialized successfully.' });
-    }
-
-    return res.status(400).json({ status: 'error', message: 'Invalid action type.' });
+    return res.status(400).json({ status: 'error', message: 'Invalid action' });
 });
 
 
